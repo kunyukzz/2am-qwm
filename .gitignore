@@ -3,5 +3,5 @@
 bin
 build
 
-2am-builder.h
+builds
 memcheck.txt

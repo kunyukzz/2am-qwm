@@ -5,7 +5,7 @@
 #    define _POSIX_C_SOURCE 200809L
 #endif
 
-#include <xcb/xcb.h>
+#include "taskbar.h"
 
 typedef struct qwm_t qwm_t;
 
@@ -15,11 +15,6 @@ typedef struct {
     void (*func)(qwm_t *);
 } keybind_t;
 
-typedef struct {
-    xcb_window_t win;
-    uint16_t height;
-} taskbar_t;
-
 struct qwm_t {
     uint16_t w, h;
 
@@ -28,7 +23,7 @@ struct qwm_t {
     const xcb_setup_t *setup;
     xcb_screen_t *screen;
 
-    taskbar_t taskbar;
+    taskbar_t *taskbar;
 
     const keybind_t *keybinds;
     uint64_t keybind_count;

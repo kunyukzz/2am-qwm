@@ -53,40 +53,82 @@ static const keybind_t std_keybinds[] = {
 
 static void handle_map_request(qwm_t *wm, xcb_map_request_event_t *ev)
 {
+    /*
+    uint32_t values[] = {
+        0,                           // x
+        0,                           // y
+        wm->w,                       // width
+        wm->h - wm->taskbar->height, // height
+    };
+    uint16_t mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y |
+                    XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
+
+    xcb_configure_window(wm->conn, ev->window, mask, values);
+    */
+
     xcb_map_window(wm->conn, ev->window);
     xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, ev->window,
                         XCB_CURRENT_TIME);
+}
+
+static void handle_configure_notify(qwm_t *wm,
+                                    xcb_configure_notify_event_t *ev)
+{
+    if (ev->window == wm->root) return;
+    if (ev->window == wm->taskbar->win) return;
+
+    uint32_t values[] = {0, 0, wm->w, wm->h - wm->taskbar->height};
+
+    // clang-format off
+    xcb_configure_window(wm->conn, ev->window,
+						 XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y |
+						 XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
+                         values);
+
+    uint32_t stack_values[] = {wm->taskbar->win, XCB_STACK_MODE_BELOW};
+
+    xcb_configure_window(wm->conn, ev->window,
+                         XCB_CONFIG_WINDOW_SIBLING | XCB_CONFIG_WINDOW_STACK_MODE,
+                         stack_values);
+    // clang-format on
 }
 
 static void handle_configure_request(qwm_t *wm,
                                      xcb_configure_request_event_t *ev)
 {
     if (ev->window == wm->root) return;
+    if (ev->window == wm->taskbar->win) return;
 
     uint16_t mask = 0;
-    uint32_t values[5];
+    uint32_t values[4];
     int i = 0;
+
+    int16_t x = 0;
+    int16_t y = 0;
+    uint16_t w = wm->w;
+    uint16_t h = wm->h - wm->taskbar->height;
 
     if (ev->value_mask & XCB_CONFIG_WINDOW_X)
     {
         mask |= XCB_CONFIG_WINDOW_X;
-        values[i++] = (uint32_t)ev->x;
+        values[i++] = (uint32_t)x;
     }
     if (ev->value_mask & XCB_CONFIG_WINDOW_Y)
     {
         mask |= XCB_CONFIG_WINDOW_Y;
-        values[i++] = (uint32_t)ev->y;
+        values[i++] = (uint32_t)y;
     }
     if (ev->value_mask & XCB_CONFIG_WINDOW_WIDTH)
     {
         mask |= XCB_CONFIG_WINDOW_WIDTH;
-        values[i++] = ev->width;
+        values[i++] = w;
     }
     if (ev->value_mask & XCB_CONFIG_WINDOW_HEIGHT)
     {
         mask |= XCB_CONFIG_WINDOW_HEIGHT;
-        values[i++] = ev->height;
+        values[i++] = h;
     }
+    /*
     if (ev->value_mask & XCB_CONFIG_WINDOW_SIBLING)
     {
         mask |= XCB_CONFIG_WINDOW_SIBLING;
@@ -97,6 +139,7 @@ static void handle_configure_request(qwm_t *wm,
         mask |= XCB_CONFIG_WINDOW_STACK_MODE;
         values[i++] = ev->stack_mode;
     }
+    */
 
     if (mask)
     {
@@ -110,8 +153,11 @@ static void handle_event(qwm_t *qwm, xcb_generic_event_t *event)
 
     switch (type)
     {
+    case XCB_EXPOSE:
+        taskbar_handle_expose(qwm, qwm->taskbar, (xcb_expose_event_t *)event);
+        break;
     case XCB_CONFIGURE_NOTIFY:
-        // TODO: implement
+        // handle_configure_notify(qwm, (xcb_configure_notify_event_t *)event);
         break;
     case XCB_MAP_REQUEST:
         handle_map_request(qwm, (xcb_map_request_event_t *)event);
@@ -185,6 +231,13 @@ qwm_t *qwm_init(void)
     qwm->keybinds = std_keybinds;
     qwm->keybind_count = sizeof(std_keybinds) / sizeof(std_keybinds[0]);
 
+    // setup taskbar
+    qwm->taskbar = taskbar_init(qwm);
+    if (!qwm->taskbar)
+    {
+        taskbar_kill(qwm, qwm->taskbar);
+    }
+
     return qwm;
 }
 
@@ -205,6 +258,9 @@ void qwm_run(qwm_t *qwm)
 void qwm_kill(qwm_t *qwm)
 {
     if (!qwm) return;
+
+    if (qwm->taskbar) taskbar_kill(qwm, qwm->taskbar);
+
     if (qwm->conn) xcb_disconnect(qwm->conn);
     free(qwm);
 }
