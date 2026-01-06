@@ -16,14 +16,15 @@ static void handle_child_signal(int sig)
     while (waitpid(-1, NULL, WNOHANG) > 0);
 }
 
-static void quit_wm(void)
+static void quit_wm(qwm_t *qwm)
 {
-    // qwm_kill(qwm);
+    qwm_kill(qwm);
     exit(0);
 }
 
-static void spawn_kitty(void)
+static void spawn_kitty(qwm_t *qwm)
 {
+    (void)qwm;
     if (fork() == 0)
     {
         setsid();
@@ -32,8 +33,9 @@ static void spawn_kitty(void)
     }
 }
 
-static void spawn_xfce_term(void)
+static void spawn_xfce_term(qwm_t *qwm)
 {
+    (void)qwm;
     if (fork() == 0)
     {
         setsid();
@@ -125,7 +127,7 @@ static void handle_event(qwm_t *qwm, xcb_generic_event_t *event)
             if (kev->detail == qwm->keybinds[i].key &&
                 (kev->state & qwm->keybinds[i].mod) == qwm->keybinds[i].mod)
             {
-                qwm->keybinds[i].func();
+                qwm->keybinds[i].func(qwm);
                 break;
             }
         }
@@ -186,6 +188,20 @@ qwm_t *qwm_init(void)
     return qwm;
 }
 
+void qwm_run(qwm_t *qwm)
+{
+    if (!qwm) return;
+
+    xcb_generic_event_t *ev;
+    while ((ev = xcb_wait_for_event(qwm->conn)))
+    {
+        handle_event(qwm, ev);
+        free(ev);
+    }
+
+    fprintf(stderr, "X connection closed\n");
+}
+
 void qwm_kill(qwm_t *qwm)
 {
     if (!qwm) return;
@@ -198,20 +214,7 @@ int main(void)
     qwm_t *qwm = qwm_init();
     if (!qwm) return 1;
 
-    for (;;)
-    {
-        xcb_generic_event_t *ev = xcb_wait_for_event(qwm->conn);
-
-        if (!ev)
-        {
-            fprintf(stderr, "X connection closed\n");
-            break;
-        }
-
-        handle_event(qwm, ev);
-        free(ev);
-    }
-
+    qwm_run(qwm);
     qwm_kill(qwm);
 
     return 0;

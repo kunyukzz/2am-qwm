@@ -7,10 +7,12 @@
 
 #include <xcb/xcb.h>
 
+typedef struct qwm_t qwm_t;
+
 typedef struct {
     uint16_t mod;
     xcb_keycode_t key;
-    void (*func)(void);
+    void (*func)(qwm_t *);
 } keybind_t;
 
 typedef struct {
@@ -18,7 +20,7 @@ typedef struct {
     uint16_t height;
 } taskbar_t;
 
-typedef struct {
+struct qwm_t {
     uint16_t w, h;
 
     xcb_connection_t *conn;
@@ -30,9 +32,11 @@ typedef struct {
 
     const keybind_t *keybinds;
     uint64_t keybind_count;
-} qwm_t;
+};
 
 qwm_t *qwm_init(void);
+
+void qwm_run(qwm_t *qwm);
 
 void qwm_kill(qwm_t *qwm);
 
