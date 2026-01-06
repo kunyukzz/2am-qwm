@@ -1,0 +1,7 @@
+.cache/
+
+bin
+build
+
+2am-builder.h
+memcheck.txt

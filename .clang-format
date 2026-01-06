@@ -1,0 +1,45 @@
+Language:        Cpp
+AccessModifierOffset: -2
+AlignAfterOpenBracket: Align
+AlignArrayOfStructures: None
+AlignEscapedNewlines: Right
+AlignOperands:   Align
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseExpressionOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: true
+AllowShortLoopsOnASingleLine: true
+AlwaysBreakAfterDefinitionReturnType: None
+BraceWrapping:
+  AfterCaseLabel:  true
+  AfterClass:      true
+  AfterControlStatement: Always
+  AfterEnum:       false
+  AfterExternBlock: true
+  AfterFunction:   true
+  AfterStruct:     false
+  AfterUnion:      true
+  BeforeCatch:     true
+  BeforeElse:      true
+  BeforeWhile:     true
+  IndentBraces:    false
+BreakArrays:     true
+BreakBeforeBraces: Custom
+ColumnLimit:     79
+ContinuationIndentWidth: 4
+IndentPPDirectives: AfterHash
+IndentWidth:     4
+InsertNewlineAtEOF: true
+KeepEmptyLines:
+  AtEndOfFile:     true
+  AtStartOfBlock:  true
+  AtStartOfFile:   true
+SortIncludes:
+  Enabled:         false
+  IgnoreCase:      false
+TabWidth:        4
+UseTab:          Never
