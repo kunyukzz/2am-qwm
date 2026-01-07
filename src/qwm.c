@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <sys/wait.h> // waitpid, sigemptyset, sigaction, SA_RESTART, SA_NOCLDSTOP
 #include <unistd.h> // fork, setsid, execlp, _exit
+#include <poll.h>   // struct pollfd, POLL_IN
 
 // NOTE: for now use what xcb keycode provide
 #define KEY_Q 24
@@ -245,11 +246,21 @@ void qwm_run(qwm_t *qwm)
 {
     if (!qwm) return;
 
-    xcb_generic_event_t *ev;
-    while ((ev = xcb_wait_for_event(qwm->conn)))
+    int xfd = xcb_get_file_descriptor(qwm->conn);
+
+    while (!xcb_connection_has_error(qwm->conn))
     {
-        handle_event(qwm, ev);
-        free(ev);
+        struct pollfd pfd = {.fd = xfd, .events = POLL_IN};
+        poll(&pfd, 1, 1000);
+
+        xcb_generic_event_t *ev;
+        while ((ev = xcb_poll_for_event(qwm->conn)))
+        {
+            handle_event(qwm, ev);
+            free(ev);
+        }
+
+        taskbar_draw(qwm, qwm->taskbar);
     }
 
     fprintf(stderr, "X connection closed\n");
