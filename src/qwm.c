@@ -260,7 +260,11 @@ void qwm_run(qwm_t *qwm)
             free(ev);
         }
 
-        taskbar_draw(qwm, qwm->taskbar);
+        int32_t dirty = taskbar_update(qwm->taskbar);
+        if (dirty)
+        {
+            taskbar_draw(qwm, qwm->taskbar);
+        }
     }
 
     fprintf(stderr, "X connection closed\n");

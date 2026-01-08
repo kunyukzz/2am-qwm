@@ -19,15 +19,51 @@ static int32_t read_file(const char *path)
     return val;
 }
 
-static int32_t battery_read_health(void)
+static int32_t read_file_string(const char *path, char *buf, uint64_t bufsize)
 {
-    int32_t full = read_file("/sys/class/power_supply/BAT0/charge_full");
-    int32_t design =
-        read_file("/sys/class/power_supply/BAT0/charge_full_design");
+    if (!buf || bufsize == 0) return -1;
 
-    if (full <= 0 || design <= 0) return -1;
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
 
-    return (full * 100) / design;
+    if (!fgets(buf, (int32_t)bufsize, f))
+    {
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    buf[strcspn(buf, "\n")] = 0;
+
+    return (int32_t)strlen(buf);
+}
+
+static battery_state_t battery_read_status(void)
+{
+    // most battery on laptop was BAT0 / BAT1
+    char buf[16];
+    int len = read_file_string("/sys/class/power_supply/BAT0/status", buf,
+                               sizeof(buf));
+    if (len <= 0) return BAT_UNKNOWN;
+
+    if (buf[len - 1] == '\n') buf[len - 1] = '\0';
+
+    if (strcmp(buf, "Charging") == 0) return BAT_CHARGING;
+    if (strcmp(buf, "Discharging") == 0) return BAT_DISCHARGING;
+    if (strcmp(buf, "Full") == 0) return BAT_FULL;
+
+    return BAT_UNKNOWN;
+}
+
+static char *battery_status_string(battery_state_t bat_state)
+{
+    switch (bat_state)
+    {
+    case BAT_CHARGING: return "Charging";
+    case BAT_DISCHARGING: return "Discharging";
+    case BAT_FULL: return "Full";
+    default: return "Not Available";
+    }
 }
 
 static int32_t battery_read_capacity(void)
@@ -35,30 +71,36 @@ static int32_t battery_read_capacity(void)
     return read_file("/sys/class/power_supply/BAT0/capacity");
 }
 
-static int32_t wifi_get_ssid(char *buf, size_t len)
+static int32_t wifi_get_ssid(char *ssid, uint64_t len)
 {
-    FILE *fp = popen("nmcli -t -f TYPE,STATE,CONNECTION device status", "r");
+    if (!ssid || len == 0) return -1;
+
+    FILE *fp = popen("nmcli -t -f NAME,DEVICE connection show --active", "r");
     if (!fp) return -1;
 
-    char line[256];
-    while (fgets(line, sizeof(line), fp))
-    {
-        char *type = strtok(line, ":");
-        char *state = strtok(NULL, ":");
-        char *conn = strtok(NULL, "\n");
+    char line[128];
+    int32_t ret = -1;
 
-        if (type && state && conn && strcmp(type, "wifi") == 0 &&
-            strcmp(state, "connected") == 0)
-        {
-            strncpy(buf, conn, len - 1);
-            buf[len - 1] = '\0';
-            pclose(fp);
-            return 0;
-        }
+    while (fgets(line, sizeof(line), fp) != NULL)
+    {
+        char *colon = strchr(line, ':');
+        if (!colon) continue;
+        if (strstr(colon + 1, "wlp") == NULL) continue;
+        *colon = '\0';
+
+        uint64_t slen = strlen(line);
+        if (slen > 0 && line[slen - 1] == '\n') line[slen - 1] = '\0';
+
+        strncpy(ssid, line, len - 1);
+        ssid[len - 1] = '\0';
+
+        ret = 0;
+        break;
     }
 
     pclose(fp);
-    return -1;
+    if (ret != 0) ssid[0] = '\0';
+    return ret;
 }
 
 static uint16_t text_px_width(xcb_connection_t *conn, xcb_font_t font,
@@ -96,7 +138,6 @@ taskbar_t *taskbar_init(struct qwm_t *qwm)
 
     tb->last_minute = -1;
     tb->bat_capacity = -1;
-    tb->bat_health = -1;
 
     tb->height = 25;
     tb->width = qwm->w;
@@ -150,6 +191,8 @@ taskbar_t *taskbar_init(struct qwm_t *qwm)
                   XCB_GC_FOREGROUND | XCB_GC_BACKGROUND | XCB_GC_FONT,
                   gc_values);
 
+    xcb_flush(qwm->conn);
+
     return tb;
 }
 
@@ -162,61 +205,59 @@ void taskbar_kill(struct qwm_t *qwm, taskbar_t *tb)
     free(tb);
 }
 
-void taskbar_update(struct qwm_t *qwm, taskbar_t *tb)
+int32_t taskbar_update(taskbar_t *tb)
 {
+    int32_t dirty = 0;
+
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
 
-    if (tm->tm_min == tb->last_minute) return;
-    tb->last_minute = tm->tm_min;
+    if (tm->tm_min != tb->last_minute)
+    {
+        tb->last_minute = tm->tm_min;
+        strftime(tb->date, sizeof(tb->date), "| %d-%m-%Y", tm);
+        strftime(tb->time, sizeof(tb->time), "| %H:%M", tm);
+        dirty = 1;
+    }
 
-    taskbar_draw(qwm, tb);
+    int32_t cap = battery_read_capacity();
+    battery_state_t bat_st = battery_read_status();
+    if (cap != tb->bat_capacity || bat_st != tb->bat_state)
+    {
+        tb->bat_capacity = cap;
+        tb->bat_state = bat_st;
+        dirty = 1;
+    }
+
+    if (wifi_get_ssid(tb->ssid, sizeof(tb->ssid)) != 0) tb->ssid[0] = '\0';
+
+    return dirty;
 }
 
 void taskbar_draw(struct qwm_t *qwm, taskbar_t *tb)
 {
-    time_t now = time(NULL);
-    struct tm *tm = localtime(&now);
-
-    if (tm->tm_min == tb->last_minute) return;
-    tb->last_minute = tm->tm_min;
-
     xcb_clear_area(qwm->conn, 0, tb->win, 0, 0, tb->width, tb->height);
 
     tb->right_x = tb->width - RIGHT_PAD;
     taskbar_draw_text(qwm, tb, 10, "2am-qwm");
 
-    char time_str[32];
+    taskbar_draw_right_text(qwm, tb, tb->date, 10);
+    taskbar_draw_right_text(qwm, tb, tb->time, 10);
 
-    // Date
-    strftime(time_str, sizeof(time_str), "%d-%m-%Y", tm);
-    taskbar_draw_right_text(qwm, tb, time_str, 10);
-
-    // clock
-    strftime(time_str, sizeof(time_str), "%H:%M", tm);
-    taskbar_draw_right_text(qwm, tb, time_str, 10);
-
-    // battery
-    char bat_str[64];
-    int32_t cap = battery_read_capacity();
-    int32_t health = battery_read_health();
-    if (cap >= 0)
+    if (tb->bat_capacity >= 0)
     {
-        if (health >= 0)
-            snprintf(bat_str, sizeof(bat_str), "BAT: %d%% [H:%d%%]", cap,
-                     health);
-        else
-            snprintf(bat_str, sizeof(bat_str), "BAT: %d%%", cap);
-
-        taskbar_draw_right_text(qwm, tb, bat_str, 5);
+        char bat[64];
+        const char *status_str = battery_status_string(tb->bat_state);
+        snprintf(bat, sizeof(bat), "| BAT: %d%% (%s)", tb->bat_capacity,
+                 status_str);
+        taskbar_draw_right_text(qwm, tb, bat, 10);
     }
 
-    char ssid[64];
-    if (wifi_get_ssid(ssid, sizeof(ssid)) == 0)
+    if (tb->ssid[0])
     {
-        char wifi_str[96];
-        snprintf(wifi_str, sizeof(wifi_str), "WIFI: %s", ssid);
-        taskbar_draw_right_text(qwm, tb, wifi_str, 5);
+        char wifi[128];
+        snprintf(wifi, sizeof(wifi), "WIFI: %s", tb->ssid);
+        taskbar_draw_right_text(qwm, tb, wifi, 10);
     }
 
     xcb_flush(qwm->conn);

@@ -5,23 +5,35 @@
 
 struct qwm_t;
 
+typedef enum {
+    BAT_UNKNOWN = 0,
+    BAT_CHARGING,
+    BAT_DISCHARGING,
+    BAT_FULL
+} battery_state_t;
+
 typedef struct {
     xcb_window_t win;
     uint16_t width, height, y_pos, right_x;
     xcb_font_t font;
     xcb_gcontext_t gc;
 
-    int32_t last_minute;
+    battery_state_t bat_state;
 
+    int32_t last_minute;
     int32_t bat_capacity;
-    int32_t bat_health;
+
+    char date[16];
+    char time[8];
+    char ssid[64];
 } taskbar_t;
 
 taskbar_t *taskbar_init(struct qwm_t *qwm);
 
 void taskbar_kill(struct qwm_t *qwm, taskbar_t *tb);
 
-void taskbar_update(struct qwm_t *qwm, taskbar_t *tb);
+int32_t taskbar_update(taskbar_t *tb);
+
 void taskbar_draw(struct qwm_t *qwm, taskbar_t *tb);
 
 void taskbar_handle_expose(struct qwm_t *qwm, taskbar_t *tb,
