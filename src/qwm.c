@@ -8,8 +8,18 @@
 
 // NOTE: for now use what xcb keycode provide
 #define KEY_Q 24
+#define KEY_W 25
 #define KEY_T 28
+#define KEY_V 55
+
 #define KEY_ENTER 36
+#define KEY_SPACE 9
+
+#define KEY_1 10
+#define KEY_2 11
+#define KEY_3 12
+#define KEY_4 13
+#define KEY_5 14
 
 static void handle_child_signal(int sig)
 {
@@ -21,6 +31,21 @@ static void quit_wm(qwm_t *qwm)
 {
     qwm_kill(qwm);
     exit(0);
+}
+
+static void quit_client_focused(qwm_t *wm)
+{
+    if (!wm) return;
+
+    workspace_t *ws = &wm->workspaces[wm->current_ws];
+    client_t *c = ws->focused;
+    if (!c) return;
+
+    xcb_void_cookie_t ck = xcb_kill_client_checked(wm->conn, c->win);
+    xcb_generic_error_t *err = xcb_request_check(wm->conn, ck);
+    if (err) free(err);
+
+    xcb_kill_client(wm->conn, c->win);
 }
 
 static void spawn_kitty(qwm_t *qwm)
@@ -45,27 +70,69 @@ static void spawn_xfce_term(qwm_t *qwm)
     }
 }
 
+static void spawn_vlc(qwm_t *qwm)
+{
+    (void)qwm;
+    if (fork() == 0)
+    {
+        setsid();
+        execlp("vlc", "vlc", NULL);
+        _exit(1);
+    }
+}
+
+static void workspace_switch(qwm_t *wm, uint16_t new_ws)
+{
+    if (!wm) return;
+    if (new_ws < 0 || new_ws >= WORKSPACE_COUNT) return;
+    if (new_ws == wm->current_ws) return;
+
+    // hide old workspace
+    workspace_t *old = &wm->workspaces[wm->current_ws];
+    for (client_t *c = old->clients; c; c = c->next)
+        xcb_unmap_window(wm->conn, c->win);
+
+    wm->current_ws = (uint16_t)new_ws;
+
+    // show new workspace
+    workspace_t *cur = &wm->workspaces[wm->current_ws];
+    for (client_t *c = cur->clients; c; c = c->next)
+    {
+        xcb_map_window(wm->conn, c->win);
+    }
+
+    if (cur->focused)
+    {
+        xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT,
+                            cur->focused->win, XCB_CURRENT_TIME);
+    }
+}
+
+static void ws_1(qwm_t *qwm) { workspace_switch(qwm, 0); }
+static void ws_2(qwm_t *qwm) { workspace_switch(qwm, 1); }
+static void ws_3(qwm_t *qwm) { workspace_switch(qwm, 2); }
+static void ws_4(qwm_t *qwm) { workspace_switch(qwm, 3); }
+static void ws_5(qwm_t *qwm) { workspace_switch(qwm, 4); }
+
 static const keybind_t std_keybinds[] = {
     {XCB_MOD_MASK_1, KEY_Q, quit_wm},
+    {XCB_MOD_MASK_1, KEY_W, quit_client_focused},
     {XCB_MOD_MASK_1, KEY_T, spawn_kitty},
     {XCB_MOD_MASK_1, KEY_ENTER, spawn_xfce_term},
+    {XCB_MOD_MASK_1, KEY_V, spawn_vlc},
+
+    {XCB_MOD_MASK_1, KEY_1, ws_1},
+    {XCB_MOD_MASK_1, KEY_2, ws_2},
+    {XCB_MOD_MASK_1, KEY_3, ws_3},
+    {XCB_MOD_MASK_1, KEY_4, ws_4},
+    {XCB_MOD_MASK_1, KEY_5, ws_5},
     // TODO: add another things
 };
 
 static void handle_map_request(qwm_t *wm, xcb_map_request_event_t *ev)
 {
-    /*
-    uint32_t values[] = {
-        0,                           // x
-        0,                           // y
-        wm->w,                       // width
-        wm->h - wm->taskbar->height, // height
-    };
-    uint16_t mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y |
-                    XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
-
-    xcb_configure_window(wm->conn, ev->window, mask, values);
-    */
+    client_t *c = client_init(wm, ev->window);
+    wm->workspaces[wm->current_ws].focused = c;
 
     xcb_map_window(wm->conn, ev->window);
     xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, ev->window,
@@ -94,6 +161,32 @@ static void handle_configure_notify(qwm_t *wm,
     // clang-format on
 }
 
+static void handle_destroy_notify(qwm_t *wm, xcb_destroy_notify_event_t *ev)
+{
+    for (uint16_t ws = 0; ws < WORKSPACE_COUNT; ws++)
+    {
+        client_t **pc = &wm->workspaces[ws].clients;
+        while (*pc)
+        {
+            client_t *c = *pc;
+            if (c->win == ev->window)
+            {
+                *pc = c->next;
+
+                // update focus if this was focused
+                if (wm->workspaces[ws].focused == c)
+                    wm->workspaces[ws].focused =
+                        wm->workspaces[ws].clients ? wm->workspaces[ws].clients
+                                                   : NULL;
+
+                client_kill(wm, c);
+                return;
+            }
+            pc = &c->next;
+        }
+    }
+}
+
 static void handle_configure_request(qwm_t *wm,
                                      xcb_configure_request_event_t *ev)
 {
@@ -101,46 +194,37 @@ static void handle_configure_request(qwm_t *wm,
     if (ev->window == wm->taskbar->win) return;
 
     uint16_t mask = 0;
-    uint32_t values[4];
-    int i = 0;
-
-    int16_t x = 0;
-    int16_t y = 0;
-    uint16_t w = wm->w;
-    uint16_t h = wm->h - wm->taskbar->height;
+    uint32_t values[7];
+    uint32_t i = 0;
 
     if (ev->value_mask & XCB_CONFIG_WINDOW_X)
     {
-        mask |= XCB_CONFIG_WINDOW_X;
-        values[i++] = (uint32_t)x;
+        values[i++] = (uint32_t)ev->x;
     }
     if (ev->value_mask & XCB_CONFIG_WINDOW_Y)
     {
-        mask |= XCB_CONFIG_WINDOW_Y;
-        values[i++] = (uint32_t)y;
+        values[i++] = (uint32_t)ev->y;
     }
     if (ev->value_mask & XCB_CONFIG_WINDOW_WIDTH)
     {
-        mask |= XCB_CONFIG_WINDOW_WIDTH;
-        values[i++] = w;
+        values[i++] = ev->width;
     }
     if (ev->value_mask & XCB_CONFIG_WINDOW_HEIGHT)
     {
-        mask |= XCB_CONFIG_WINDOW_HEIGHT;
-        values[i++] = h;
+        values[i++] = ev->height;
     }
-    /*
+    if (ev->value_mask & XCB_CONFIG_WINDOW_BORDER_WIDTH)
+    {
+        values[i++] = ev->border_width;
+    }
     if (ev->value_mask & XCB_CONFIG_WINDOW_SIBLING)
     {
-        mask |= XCB_CONFIG_WINDOW_SIBLING;
         values[i++] = ev->sibling;
     }
     if (ev->value_mask & XCB_CONFIG_WINDOW_STACK_MODE)
     {
-        mask |= XCB_CONFIG_WINDOW_STACK_MODE;
         values[i++] = ev->stack_mode;
     }
-    */
 
     if (mask)
     {
@@ -165,6 +249,9 @@ static void handle_event(qwm_t *qwm, xcb_generic_event_t *event)
         break;
     case XCB_CONFIGURE_REQUEST:
         handle_configure_request(qwm, (xcb_configure_request_event_t *)event);
+        break;
+    case XCB_DESTROY_NOTIFY:
+        handle_destroy_notify(qwm, (xcb_destroy_notify_event_t *)event);
         break;
     case XCB_KEY_PRESS:
     {
@@ -213,6 +300,12 @@ qwm_t *qwm_init(void)
     qwm->root = qwm->screen->root;
     qwm->w = qwm->screen->width_in_pixels;
     qwm->h = qwm->screen->height_in_pixels;
+    qwm->clients = NULL;
+    qwm->current_ws = 0;
+    for (int i = 0; i < WORKSPACE_COUNT; ++i)
+    {
+        qwm->workspaces[i].clients = NULL;
+    }
 
     // clang-format off
     uint32_t qwm_mask = XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_KEY_PRESS;
@@ -231,12 +324,20 @@ qwm_t *qwm_init(void)
     // setup keybinding
     qwm->keybinds = std_keybinds;
     qwm->keybind_count = sizeof(std_keybinds) / sizeof(std_keybinds[0]);
+    for (uint64_t i = 0; i < qwm->keybind_count; ++i)
+    {
+        xcb_grab_key(qwm->conn, 1, qwm->root, qwm->keybinds[i].mod,
+                     qwm->keybinds[i].key, XCB_GRAB_MODE_ASYNC,
+                     XCB_GRAB_MODE_ASYNC);
+    }
 
     // setup taskbar
     qwm->taskbar = taskbar_init(qwm);
     if (!qwm->taskbar)
     {
-        taskbar_kill(qwm, qwm->taskbar);
+        xcb_disconnect(qwm->conn);
+        free(qwm);
+        return NULL;
     }
 
     return qwm;
@@ -260,7 +361,7 @@ void qwm_run(qwm_t *qwm)
             free(ev);
         }
 
-        int32_t dirty = taskbar_update(qwm->taskbar);
+        int32_t dirty = taskbar_update(qwm, qwm->taskbar);
         if (dirty)
         {
             taskbar_draw(qwm, qwm->taskbar);

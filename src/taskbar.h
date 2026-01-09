@@ -22,6 +22,7 @@ typedef struct {
 
     int32_t last_minute;
     int32_t bat_capacity;
+    int32_t last_ws;
 
     char date[16];
     char time[8];
@@ -32,7 +33,7 @@ taskbar_t *taskbar_init(struct qwm_t *qwm);
 
 void taskbar_kill(struct qwm_t *qwm, taskbar_t *tb);
 
-int32_t taskbar_update(taskbar_t *tb);
+int32_t taskbar_update(struct qwm_t *qwm, taskbar_t *tb);
 
 void taskbar_draw(struct qwm_t *qwm, taskbar_t *tb);
 

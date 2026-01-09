@@ -75,6 +75,7 @@ static int32_t wifi_get_ssid(char *ssid, uint64_t len)
 {
     if (!ssid || len == 0) return -1;
 
+    // use simpler way - Network Manager
     FILE *fp = popen("nmcli -t -f NAME,DEVICE connection show --active", "r");
     if (!fp) return -1;
 
@@ -106,10 +107,25 @@ static int32_t wifi_get_ssid(char *ssid, uint64_t len)
 static uint16_t text_px_width(xcb_connection_t *conn, xcb_font_t font,
                               const char *text)
 {
-    xcb_query_text_extents_cookie_t cookie = xcb_query_text_extents(
-        conn, font, (uint32_t)strlen(text), (xcb_char2b_t *)text);
+    // Core X fonts are always 2-byte per character, even for ASCII.
+    // The high byte MUST be initialized (usually zero), otherwise xcb
+    // will send uninitialized data to the X server.
+    uint64_t len = strlen(text);
+    xcb_char2b_t *chars = calloc(len, sizeof(xcb_char2b_t));
+    if (!chars) return 0;
+
+    for (uint64_t i = 0; i < len; ++i)
+    {
+        chars[i].byte1 = 0;
+        chars[i].byte2 = (uint8_t)text[i];
+    }
+
+    xcb_query_text_extents_cookie_t cookie =
+        xcb_query_text_extents(conn, font, (uint32_t)len, chars);
     xcb_query_text_extents_reply_t *rep =
         xcb_query_text_extents_reply(conn, cookie, NULL);
+
+    free(chars);
     if (!rep) return 0;
 
     uint16_t width = (uint16_t)rep->overall_width;
@@ -133,11 +149,16 @@ static xcb_atom_t get_atom(xcb_connection_t *conn, const char *name)
 
 taskbar_t *taskbar_init(struct qwm_t *qwm)
 {
-    taskbar_t *tb = malloc(sizeof(taskbar_t));
+    taskbar_t *tb = calloc(1, sizeof(taskbar_t));
     if (!tb) return NULL;
 
     tb->last_minute = -1;
+    tb->last_ws = -1;
     tb->bat_capacity = -1;
+    tb->bat_state = BAT_UNKNOWN;
+    tb->date[0] = '\0';
+    tb->time[0] = '\0';
+    tb->ssid[0] = '\0';
 
     tb->height = 25;
     tb->width = qwm->w;
@@ -205,7 +226,7 @@ void taskbar_kill(struct qwm_t *qwm, taskbar_t *tb)
     free(tb);
 }
 
-int32_t taskbar_update(taskbar_t *tb)
+int32_t taskbar_update(struct qwm_t *qwm, taskbar_t *tb)
 {
     int32_t dirty = 0;
 
@@ -231,6 +252,12 @@ int32_t taskbar_update(taskbar_t *tb)
 
     if (wifi_get_ssid(tb->ssid, sizeof(tb->ssid)) != 0) tb->ssid[0] = '\0';
 
+    if (tb->last_ws != qwm->current_ws)
+    {
+        tb->last_ws = qwm->current_ws;
+        dirty = 1;
+    }
+
     return dirty;
 }
 
@@ -240,6 +267,10 @@ void taskbar_draw(struct qwm_t *qwm, taskbar_t *tb)
 
     tb->right_x = tb->width - RIGHT_PAD;
     taskbar_draw_text(qwm, tb, 10, "2am-qwm");
+
+    char ws[16];
+    snprintf(ws, sizeof(ws), "WS:%d", qwm->current_ws + 1);
+    taskbar_draw_text(qwm, tb, 80, ws);
 
     taskbar_draw_right_text(qwm, tb, tb->date, 10);
     taskbar_draw_right_text(qwm, tb, tb->time, 10);
