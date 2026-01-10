@@ -7,15 +7,9 @@
 
 #include "taskbar.h"
 #include "client.h"
+#include "views.h"
 
 typedef struct qwm_t qwm_t;
-
-#define WORKSPACE_COUNT 5
-
-typedef struct {
-    client_t *clients;
-    client_t *focused;
-} workspace_t;
 
 typedef struct {
     uint16_t mod;

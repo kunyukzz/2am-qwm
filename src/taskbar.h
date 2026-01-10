@@ -2,6 +2,7 @@
 #define TASKBAR_H
 
 #include <xcb/xcb.h>
+#include "views.h"
 
 struct qwm_t;
 
@@ -23,9 +24,13 @@ typedef struct {
     int32_t last_minute;
     int32_t bat_capacity;
     int32_t last_ws;
+    int64_t uptime;
+    int64_t last_uptime;
+    layout_type_t last_layout;
 
-    char date[16];
     char time[8];
+    char date[16];
+    char governor[16];
     char ssid[64];
 } taskbar_t;
 

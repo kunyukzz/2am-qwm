@@ -7,6 +7,9 @@
 
 #define RIGHT_PAD 10
 
+#define CPU_GOV_PATH "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"
+#define BAT_CAPACITY_PATH "sys/class/power_supply/BAT0/capacity"
+
 static int32_t read_file(const char *path)
 {
     FILE *f = fopen(path, "r");
@@ -36,6 +39,18 @@ static int32_t read_file_string(const char *path, char *buf, uint64_t bufsize)
     buf[strcspn(buf, "\n")] = 0;
 
     return (int32_t)strlen(buf);
+}
+
+static int64_t read_uptime(void)
+{
+    FILE *f = fopen("/proc/uptime", "r");
+    if (!f) return -1;
+
+    double up = 0.0;
+    if (fscanf(f, "%lf", &up) != 1) up = -1;
+
+    fclose(f);
+    return (int64_t)up;
 }
 
 static battery_state_t battery_read_status(void)
@@ -147,6 +162,33 @@ static xcb_atom_t get_atom(xcb_connection_t *conn, const char *name)
     return atom;
 }
 
+static const char *layout_name(layout_type_t t)
+{
+    switch (t)
+    {
+    case LAYOUT_MONOCLE: return "[Monocle]";
+    case LAYOUT_TILE: return "[Tiled]";
+    case LAYOUT_FLOAT: return "[Float]";
+    default: return "[?]";
+    }
+}
+
+static void format_uptime(int64_t min, char *buf, size_t sz)
+{
+    int d = (int)min / (60 * 24);
+    int h = (min / 60) % 24;
+    int m = min % 60;
+
+    if (d > 0)
+        snprintf(buf, sz, "| UP: %dd %02dh %02dm", d, h, m);
+    else
+        snprintf(buf, sz, "| UP: %02dh %02dm", h, m);
+}
+
+/*****************************
+ * TASKBAR
+ *****************************/
+
 taskbar_t *taskbar_init(struct qwm_t *qwm)
 {
     taskbar_t *tb = calloc(1, sizeof(taskbar_t));
@@ -156,9 +198,12 @@ taskbar_t *taskbar_init(struct qwm_t *qwm)
     tb->last_ws = -1;
     tb->bat_capacity = -1;
     tb->bat_state = BAT_UNKNOWN;
+    tb->uptime = -1;
+    tb->last_uptime = -1;
     tb->date[0] = '\0';
     tb->time[0] = '\0';
     tb->ssid[0] = '\0';
+    tb->governor[0] = '\0';
 
     tb->height = 25;
     tb->width = qwm->w;
@@ -258,6 +303,38 @@ int32_t taskbar_update(struct qwm_t *qwm, taskbar_t *tb)
         dirty = 1;
     }
 
+    layout_type_t cur = qwm->workspaces[qwm->current_ws].type;
+    if (tb->last_layout != cur)
+    {
+        tb->last_layout = cur;
+        dirty = 1;
+    }
+
+    // NOTE: this works with governor auto-update in mind
+    // if not, can be move to initialized taskbar
+    char gov[16];
+    if (read_file_string(CPU_GOV_PATH, gov, sizeof(gov)) > 0)
+    {
+        if (strcmp(gov, tb->governor) != 0)
+        {
+            strncpy(tb->governor, gov, sizeof(tb->governor));
+            dirty = 1;
+        }
+    }
+
+    int64_t up = read_uptime();
+    if (up >= 0)
+    {
+        int64_t up_min = up / 60;
+
+        if (up_min != tb->last_uptime)
+        {
+            tb->last_uptime = up_min;
+            tb->uptime = up_min;
+            dirty = 1;
+        }
+    }
+
     return dirty;
 }
 
@@ -269,8 +346,11 @@ void taskbar_draw(struct qwm_t *qwm, taskbar_t *tb)
     taskbar_draw_text(qwm, tb, 10, "2am-qwm");
 
     char ws[16];
-    snprintf(ws, sizeof(ws), "WS:%d", qwm->current_ws + 1);
-    taskbar_draw_text(qwm, tb, 80, ws);
+    snprintf(ws, sizeof(ws), "| WS: %d", qwm->current_ws + 1);
+    taskbar_draw_text(qwm, tb, 60, ws);
+
+    const char *layout = layout_name(qwm->workspaces[qwm->current_ws].type);
+    taskbar_draw_text(qwm, tb, 110, layout);
 
     taskbar_draw_right_text(qwm, tb, tb->date, 10);
     taskbar_draw_right_text(qwm, tb, tb->time, 10);
@@ -283,6 +363,17 @@ void taskbar_draw(struct qwm_t *qwm, taskbar_t *tb)
                  status_str);
         taskbar_draw_right_text(qwm, tb, bat, 10);
     }
+
+    if (tb->governor[0])
+    {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "| GOV: %s", tb->governor);
+        taskbar_draw_right_text(qwm, tb, buf, 10);
+    }
+
+    char up[32];
+    format_uptime(tb->uptime, up, sizeof(up));
+    taskbar_draw_right_text(qwm, tb, up, 10);
 
     if (tb->ssid[0])
     {
@@ -313,8 +404,7 @@ void taskbar_draw_right_text(struct qwm_t *qwm, taskbar_t *tb,
     uint16_t text_width = text_px_width(qwm->conn, tb->font, text);
     tb->right_x -= text_width;
 
-    xcb_image_text_8(qwm->conn, (uint8_t)strlen(text), tb->win, tb->gc,
-                     (int16_t)tb->right_x, tb->height / 2 + 4, text);
+    taskbar_draw_text(qwm, tb, tb->right_x, text);
 
     tb->right_x -= spacing;
 }
