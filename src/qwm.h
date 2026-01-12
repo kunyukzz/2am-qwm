@@ -8,6 +8,7 @@
 #include "taskbar.h"
 #include "client.h"
 #include "views.h"
+#include "tray_status.h"
 
 typedef struct qwm_t qwm_t;
 
@@ -17,6 +18,16 @@ typedef struct {
     void (*func)(qwm_t *);
 } keybind_t;
 
+// NOTE: some of these may be not using it
+typedef struct {
+    xcb_atom_t wm_protocols;
+    xcb_atom_t wm_delete_window;
+    xcb_atom_t wm_take_focus;
+    xcb_atom_t net_wm_name;
+    xcb_atom_t net_supported;
+    xcb_atom_t net_active_window;
+} atom_t;
+
 struct qwm_t {
     uint16_t w, h;
 
@@ -25,8 +36,10 @@ struct qwm_t {
     const xcb_setup_t *setup;
     xcb_screen_t *screen;
 
+    atom_t atom;
+
     taskbar_t *taskbar;
-    client_t *clients;
+    tray_status_t tray;
 
     const keybind_t *keybinds;
     uint64_t keybind_count;

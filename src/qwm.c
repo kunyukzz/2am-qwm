@@ -1,6 +1,7 @@
 #include "qwm.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <sys/wait.h> // waitpid, sigemptyset, sigaction, SA_RESTART, SA_NOCLDSTOP
 #include <unistd.h> // fork, setsid, execlp, _exit
@@ -87,6 +88,20 @@ static void spawn_vlc(qwm_t *qwm)
         _exit(1);
     }
 }
+
+// GENERIC SPAWN
+/*
+static void spawn(qwm_t *qwm, const char *cmd)
+{
+    (void)qwm;
+    if (fork() == 0)
+    {
+        setsid();
+        execlp(cmd, cmd, NULL);
+        _exit(1);
+    }
+}
+*/
 
 static void workspace_switch(qwm_t *wm, uint16_t new_ws)
 {
@@ -178,11 +193,11 @@ static void ws_3(qwm_t *qwm) { workspace_switch(qwm, 2); }
 static void ws_4(qwm_t *qwm) { workspace_switch(qwm, 3); }
 static void ws_5(qwm_t *qwm) { workspace_switch(qwm, 4); }
 
+// TODO: make this generic & configureable
 static const keybind_t std_keybinds[] = {
     {XCB_MOD_MASK_1, KEY_Q, quit_wm},
     {XCB_MOD_MASK_1, KEY_W, quit_client_focused},
 
-    // TODO: make this generic & configureable
     {XCB_MOD_MASK_1, KEY_T, spawn_kitty},
     {XCB_MOD_MASK_1, KEY_ENTER, spawn_xfce_term},
     {XCB_MOD_MASK_1, KEY_V, spawn_vlc},
@@ -214,26 +229,29 @@ static void handle_map_request(qwm_t *wm, xcb_map_request_event_t *ev)
     xcb_flush(wm->conn);
 }
 
-static void handle_configure_notify(qwm_t *wm,
-                                    xcb_configure_notify_event_t *ev)
+static void handle_enter_notify(qwm_t *wm, xcb_enter_notify_event_t *ev)
 {
-    if (ev->window == wm->root) return;
-    if (ev->window == wm->taskbar->win) return;
+    for (uint16_t ws = 0; ws < WORKSPACE_COUNT; ws++)
+    {
+        workspace_t *w = &wm->workspaces[ws];
+        for (client_t *c = w->clients; c; c = c->next)
+        {
+            if (c->win == ev->event)
+            {
+                if (wm->current_ws != ws) return;
+                w->focused = c;
+                xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT,
+                                    c->win, XCB_CURRENT_TIME);
 
-    uint32_t values[] = {0, 0, wm->w, wm->h - wm->taskbar->height};
+                // raise window
+                uint32_t v[] = {XCB_STACK_MODE_ABOVE};
+                xcb_configure_window(wm->conn, c->win,
+                                     XCB_CONFIG_WINDOW_STACK_MODE, v);
 
-    // clang-format off
-    xcb_configure_window(wm->conn, ev->window,
-						 XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y |
-						 XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
-                         values);
-
-    uint32_t stack_values[] = {wm->taskbar->win, XCB_STACK_MODE_BELOW};
-
-    xcb_configure_window(wm->conn, ev->window,
-                         XCB_CONFIG_WINDOW_SIBLING | XCB_CONFIG_WINDOW_STACK_MODE,
-                         stack_values);
-    // clang-format on
+                return;
+            }
+        }
+    }
 }
 
 static void handle_destroy_notify(qwm_t *wm, xcb_destroy_notify_event_t *ev)
@@ -313,14 +331,26 @@ static void handle_event(qwm_t *qwm, xcb_generic_event_t *event)
     case XCB_EXPOSE:
         taskbar_handle_expose(qwm, qwm->taskbar, (xcb_expose_event_t *)event);
         break;
-    case XCB_CONFIGURE_NOTIFY:
-        // handle_configure_notify(qwm, (xcb_configure_notify_event_t *)event);
+    case XCB_CLIENT_MESSAGE:
+    {
+        xcb_client_message_event_t *cev = (xcb_client_message_event_t *)event;
+        if (cev->type == qwm->atom.wm_protocols)
+        {
+            if (cev->data.data32[0] == qwm->atom.wm_delete_window)
+            {
+                xcb_destroy_window(qwm->conn, cev->window);
+            }
+        }
         break;
+    }
     case XCB_MAP_REQUEST:
         handle_map_request(qwm, (xcb_map_request_event_t *)event);
         break;
     case XCB_CONFIGURE_REQUEST:
         handle_configure_request(qwm, (xcb_configure_request_event_t *)event);
+        break;
+    case XCB_ENTER_NOTIFY:
+        handle_enter_notify(qwm, (xcb_enter_notify_event_t *)event);
         break;
     case XCB_DESTROY_NOTIFY:
         handle_destroy_notify(qwm, (xcb_destroy_notify_event_t *)event);
@@ -346,6 +376,17 @@ static void handle_event(qwm_t *qwm, xcb_generic_event_t *event)
     xcb_flush(qwm->conn);
 }
 
+static xcb_atom_t intern_atom(qwm_t *qwm, const char *name)
+{
+    xcb_intern_atom_cookie_t cookie =
+        xcb_intern_atom(qwm->conn, 0, (uint16_t)strlen(name), name);
+    xcb_intern_atom_reply_t *reply =
+        xcb_intern_atom_reply(qwm->conn, cookie, NULL);
+    xcb_atom_t atom = reply ? reply->atom : XCB_NONE;
+    free(reply);
+    return atom;
+}
+
 /*****************************
  * WINDOW MANAGER
  *****************************/
@@ -364,7 +405,11 @@ qwm_t *qwm_init(void)
     if (!qwm) return NULL;
 
     qwm->conn = xcb_connect(NULL, NULL);
-    if (xcb_connection_has_error(qwm->conn)) return NULL;
+    if (xcb_connection_has_error(qwm->conn))
+    {
+        free(qwm);
+        return NULL;
+    }
 
     const xcb_setup_t *setup = xcb_get_setup(qwm->conn);
     xcb_screen_iterator_t qwm_it = xcb_setup_roots_iterator(setup);
@@ -382,7 +427,9 @@ qwm_t *qwm_init(void)
     }
 
     // clang-format off
-    uint32_t qwm_mask = XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_KEY_PRESS;
+	uint32_t qwm_mask = XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_KEY_PRESS |
+						XCB_EVENT_MASK_PROPERTY_CHANGE | XCB_EVENT_MASK_ENTER_WINDOW |XCB_EVENT_MASK_FOCUS_CHANGE;
+
     xcb_void_cookie_t ck = xcb_change_window_attributes_checked( qwm->conn, qwm->root, XCB_CW_EVENT_MASK, &qwm_mask);
     xcb_generic_error_t *qwm_err = xcb_request_check(qwm->conn, ck);
     // clang-format on
@@ -394,6 +441,23 @@ qwm_t *qwm_init(void)
         free(qwm);
         return NULL;
     }
+
+    qwm->atom.wm_protocols = intern_atom(qwm, "WM_PROTOCOLS");
+    qwm->atom.wm_delete_window = intern_atom(qwm, "WM_DELETE_WINDOW");
+    qwm->atom.wm_take_focus = intern_atom(qwm, "WM_TAKE_FOCUS");
+    qwm->atom.net_wm_name = intern_atom(qwm, "_NET_WM_NAME");
+    qwm->atom.net_supported = intern_atom(qwm, "_NET_SUPPORTED");
+    qwm->atom.net_active_window = intern_atom(qwm, "_NET_ACTIVE_WINDOW");
+
+    xcb_atom_t supported[] = {
+        qwm->atom.net_supported,
+        qwm->atom.net_wm_name,
+        qwm->atom.net_active_window,
+    };
+
+    xcb_change_property(qwm->conn, XCB_PROP_MODE_REPLACE, qwm->root,
+                        qwm->atom.net_supported, XCB_ATOM_ATOM, 32,
+                        sizeof(supported) / sizeof(xcb_atom_t), supported);
 
     // setup keybinding
     qwm->keybinds = std_keybinds;
@@ -414,6 +478,10 @@ qwm_t *qwm_init(void)
         return NULL;
     }
 
+    tray_init(&qwm->tray);
+
+    xcb_flush(qwm->conn);
+
     return qwm;
 }
 
@@ -422,6 +490,7 @@ void qwm_run(qwm_t *qwm)
     if (!qwm) return;
 
     int xfd = xcb_get_file_descriptor(qwm->conn);
+    int32_t dirty = 1;
 
     while (!xcb_connection_has_error(qwm->conn))
     {
@@ -435,10 +504,11 @@ void qwm_run(qwm_t *qwm)
             free(ev);
         }
 
-        int32_t dirty = taskbar_update(qwm, qwm->taskbar);
+        dirty |= tray_update(qwm, &qwm->tray);
         if (dirty)
         {
-            taskbar_draw(qwm, qwm->taskbar);
+            taskbar_draw(qwm, qwm->taskbar, &qwm->tray);
+            dirty = 0;
         }
     }
 
