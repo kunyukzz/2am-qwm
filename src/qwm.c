@@ -21,7 +21,8 @@
 #define KEY_V 55
 
 #define KEY_ENTER 36
-#define KEY_SPACE 9
+#define KEY_ESCAPE 9
+#define KEY_SPACE 65
 
 #define KEY_1 10
 #define KEY_2 11
@@ -87,6 +88,13 @@ static void spawn_vlc(qwm_t *qwm)
         execlp("vlc", "vlc", NULL);
         _exit(1);
     }
+}
+
+static void spawn_launcher(qwm_t *qwm)
+{
+    if (qwm->launcher.opened) return;
+    launcher_open(qwm, &qwm->launcher);
+    qwm->launcher.opened = 1;
 }
 
 // GENERIC SPAWN
@@ -211,6 +219,8 @@ static const keybind_t std_keybinds[] = {
     {XCB_MOD_MASK_1, KEY_3, ws_3},
     {XCB_MOD_MASK_1, KEY_4, ws_4},
     {XCB_MOD_MASK_1, KEY_5, ws_5},
+
+    {XCB_MOD_MASK_1, KEY_SPACE, spawn_launcher},
     // TODO: add another things
 };
 
@@ -358,6 +368,13 @@ static void handle_event(qwm_t *qwm, xcb_generic_event_t *event)
     case XCB_KEY_PRESS:
     {
         xcb_key_press_event_t *kev = (xcb_key_press_event_t *)event;
+
+        if (qwm->launcher.opened)
+        {
+            launcher_handle_event(qwm, &qwm->launcher, event);
+            return;
+        }
+
         for (size_t i = 0; i < qwm->keybind_count; ++i)
         {
             if (kev->detail == qwm->keybinds[i].key &&
@@ -479,6 +496,8 @@ qwm_t *qwm_init(void)
     }
 
     tray_init(&qwm->tray);
+
+    launcher_init(&qwm->launcher);
 
     xcb_flush(qwm->conn);
 
