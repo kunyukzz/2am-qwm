@@ -18,6 +18,8 @@
 #define KEY_K 45
 #define KEY_L 46
 
+#define KEY_S 39
+
 #define KEY_V 55
 
 #define KEY_ENTER 36
@@ -140,7 +142,9 @@ static void focus_next(qwm_t *wm)
     client_t *next = ws->focused->next;
     if (!next) next = ws->clients;
 
+    client_set_focus(wm, ws->focused, 0);
     ws->focused = next;
+    client_set_focus(wm, ws->focused, 1);
 
     xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, next->win,
                         XCB_CURRENT_TIME);
@@ -171,7 +175,9 @@ static void focus_prev(qwm_t *wm)
         prev = c;
     }
 
+    client_set_focus(wm, ws->focused, 0);
     ws->focused = prev;
+    client_set_focus(wm, ws->focused, 1);
 
     xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, prev->win,
                         XCB_CURRENT_TIME);
@@ -179,6 +185,29 @@ static void focus_prev(qwm_t *wm)
     uint32_t v[] = {XCB_STACK_MODE_ABOVE};
     xcb_configure_window(wm->conn, ws->focused->win,
                          XCB_CONFIG_WINDOW_STACK_MODE, v);
+}
+
+void swap_master(qwm_t *wm)
+{
+    workspace_t *w = &wm->workspaces[wm->current_ws];
+    client_t *f = w->focused;
+
+    if (!w->clients || !f) return;
+    if (w->clients == f) return;
+
+    client_t **pc = &w->clients;
+
+    // unlink focused client
+    while (*pc && *pc != f) pc = &(*pc)->next;
+
+    if (!*pc) return;
+    *pc = f->next;
+
+    // move to front
+    f->next = w->clients;
+    w->clients = f;
+
+    layout_apply(wm, wm->current_ws);
 }
 
 static void ws_1(qwm_t *qwm) { workspace_switch(qwm, 0); }
@@ -199,6 +228,7 @@ static const keybind_t std_keybinds[] = {
     {XCB_MOD_MASK_1, KEY_O, toggle_layout},
     {XCB_MOD_MASK_1, KEY_J, focus_next},
     {XCB_MOD_MASK_1, KEY_K, focus_prev},
+    {XCB_MOD_MASK_1, KEY_S, swap_master},
 
     {XCB_MOD_MASK_1, KEY_1, ws_1},
     {XCB_MOD_MASK_1, KEY_2, ws_2},
@@ -212,8 +242,12 @@ static const keybind_t std_keybinds[] = {
 
 static void handle_map_request(qwm_t *wm, xcb_map_request_event_t *ev)
 {
+    workspace_t *ws = &wm->workspaces[wm->current_ws];
     client_t *c = client_init(wm, ev->window);
-    wm->workspaces[wm->current_ws].focused = c;
+
+    if (ws->focused) client_set_focus(wm, ws->focused, 0);
+    ws->focused = c;
+    client_set_focus(wm, c, 1);
 
     xcb_map_window(wm->conn, ev->window);
 
@@ -227,25 +261,28 @@ static void handle_map_request(qwm_t *wm, xcb_map_request_event_t *ev)
 
 static void handle_enter_notify(qwm_t *wm, xcb_enter_notify_event_t *ev)
 {
-    for (uint16_t ws = 0; ws < WORKSPACE_COUNT; ws++)
+    workspace_t *w = &wm->workspaces[wm->current_ws];
+
+    for (client_t *c = w->clients; c; c = c->next)
     {
-        workspace_t *w = &wm->workspaces[ws];
-        for (client_t *c = w->clients; c; c = c->next)
+        if (c->win == ev->event)
         {
-            if (c->win == ev->event)
-            {
-                if (wm->current_ws != ws) return;
-                w->focused = c;
-                xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT,
-                                    c->win, XCB_CURRENT_TIME);
+            if (w->focused == c) return;
+            if (w->focused) client_set_focus(wm, w->focused, 0);
 
-                // raise window
-                uint32_t v[] = {XCB_STACK_MODE_ABOVE};
-                xcb_configure_window(wm->conn, c->win,
-                                     XCB_CONFIG_WINDOW_STACK_MODE, v);
+            // focus new
+            w->focused = c;
+            client_set_focus(wm, c, 1);
 
-                return;
-            }
+            xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, c->win,
+                                XCB_CURRENT_TIME);
+
+            // raise window
+            uint32_t v[] = {XCB_STACK_MODE_ABOVE};
+            xcb_configure_window(wm->conn, c->win,
+                                 XCB_CONFIG_WINDOW_STACK_MODE, v);
+
+            return;
         }
     }
 }
@@ -254,6 +291,7 @@ static void handle_destroy_notify(qwm_t *wm, xcb_destroy_notify_event_t *ev)
 {
     for (uint16_t ws = 0; ws < WORKSPACE_COUNT; ws++)
     {
+        workspace_t *w = &wm->workspaces[ws];
         client_t **pc = &wm->workspaces[ws].clients;
         while (*pc)
         {
@@ -262,13 +300,23 @@ static void handle_destroy_notify(qwm_t *wm, xcb_destroy_notify_event_t *ev)
             {
                 *pc = c->next;
 
-                // update focus if this was focused
-                if (wm->workspaces[ws].focused == c)
-                    wm->workspaces[ws].focused =
-                        wm->workspaces[ws].clients ? wm->workspaces[ws].clients
-                                                   : NULL;
-
+                int32_t was_focused = (w->focused == c);
                 client_kill(wm, c);
+
+                // update focus if this was focused
+                if (was_focused)
+                {
+                    w->focused = w->clients;
+
+                    if (w->focused)
+                    {
+                        client_set_focus(wm, w->focused, 1);
+                        xcb_set_input_focus(wm->conn,
+                                            XCB_INPUT_FOCUS_POINTER_ROOT,
+                                            w->focused->win, XCB_CURRENT_TIME);
+                    }
+                }
+
                 layout_apply(wm, ws);
                 return;
             }
@@ -277,30 +325,63 @@ static void handle_destroy_notify(qwm_t *wm, xcb_destroy_notify_event_t *ev)
     }
 }
 
+static int32_t allow_configure(qwm_t *wm, xcb_window_t win)
+{
+    for (uint16_t ws = 0; ws < WORKSPACE_COUNT; ws++)
+    {
+        workspace_t *w = &wm->workspaces[ws];
+        for (client_t *c = w->clients; c; c = c->next)
+        {
+            if (c->win == win) return 1;
+        }
+    }
+    return 1;
+}
+
 static void handle_configure_request(qwm_t *wm,
                                      xcb_configure_request_event_t *ev)
 {
     if (ev->window == wm->root) return;
     if (ev->window == wm->taskbar->win) return;
 
+    if (!allow_configure(wm, ev->window)) return;
+
     uint32_t values[7];
+    uint16_t mask = 0;
     uint32_t i = 0;
+
+    int32_t x = ev->x;
+    int32_t y = ev->y;
+    int32_t w = ev->width;
+    int32_t h = ev->height;
+
+    int32_t max_x = wm->w - w - 2 * BORDER_WIDTH;
+    int32_t max_y = wm->h - wm->taskbar->height - h - 2 * BORDER_WIDTH;
+
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x > max_x) x = max_x;
+    if (y > max_y) y = max_y;
 
     if (ev->value_mask & XCB_CONFIG_WINDOW_X)
     {
-        values[i++] = (uint32_t)ev->x;
+        mask |= XCB_CONFIG_WINDOW_X;
+        values[i++] = (uint32_t)x;
     }
     if (ev->value_mask & XCB_CONFIG_WINDOW_Y)
     {
-        values[i++] = (uint32_t)ev->y;
+        mask |= XCB_CONFIG_WINDOW_Y;
+        values[i++] = (uint32_t)y;
     }
     if (ev->value_mask & XCB_CONFIG_WINDOW_WIDTH)
     {
-        values[i++] = ev->width;
+        mask |= XCB_CONFIG_WINDOW_WIDTH;
+        values[i++] = (uint32_t)w;
     }
     if (ev->value_mask & XCB_CONFIG_WINDOW_HEIGHT)
     {
-        values[i++] = ev->height;
+        mask |= XCB_CONFIG_WINDOW_HEIGHT;
+        values[i++] = (uint32_t)h;
     }
     if (ev->value_mask & XCB_CONFIG_WINDOW_BORDER_WIDTH)
     {
@@ -315,7 +396,8 @@ static void handle_configure_request(qwm_t *wm,
         values[i++] = ev->stack_mode;
     }
 
-    xcb_configure_window(wm->conn, ev->window, ev->value_mask, values);
+    if (mask)
+        xcb_configure_window(wm->conn, ev->window, ev->value_mask, values);
 }
 
 static void handle_event(qwm_t *qwm, xcb_generic_event_t *event)
@@ -437,6 +519,7 @@ qwm_t *qwm_init(void)
 
     // clang-format off
 	uint32_t qwm_mask = XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_KEY_PRESS |
+						XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE | XCB_EVENT_MASK_POINTER_MOTION |
 						XCB_EVENT_MASK_PROPERTY_CHANGE | XCB_EVENT_MASK_ENTER_WINDOW |XCB_EVENT_MASK_FOCUS_CHANGE;
 
     xcb_void_cookie_t ck = xcb_change_window_attributes_checked( qwm->conn, qwm->root, XCB_CW_EVENT_MASK, &qwm_mask);

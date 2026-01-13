@@ -11,6 +11,11 @@
 #include "tray_status.h"
 #include "launcher.h"
 
+#define BORDER_WIDTH 2
+
+#define COLOR_FOCUS 0xff0000 // red
+#define COLOR_UNFOCUS 0x222222
+
 typedef struct qwm_t qwm_t;
 
 typedef struct {

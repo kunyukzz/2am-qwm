@@ -49,3 +49,14 @@ void client_configure(struct qwm_t *wm, client_t *c, uint32_t x, uint32_t y,
 
     xcb_configure_window(wm->conn, c->win, mask, values);
 }
+
+void client_set_focus(struct qwm_t *wm, client_t *c, int32_t focused)
+{
+    uint32_t v[2];
+
+    v[0] = focused ? BORDER_WIDTH : 0;
+    xcb_configure_window(wm->conn, c->win, XCB_CONFIG_WINDOW_BORDER_WIDTH, v);
+
+    v[0] = focused ? COLOR_FOCUS : COLOR_UNFOCUS;
+    xcb_change_window_attributes(wm->conn, c->win, XCB_CW_BORDER_PIXEL, v);
+}
