@@ -97,20 +97,6 @@ static void spawn_launcher(qwm_t *qwm)
     qwm->launcher.opened = 1;
 }
 
-// GENERIC SPAWN
-/*
-static void spawn(qwm_t *qwm, const char *cmd)
-{
-    (void)qwm;
-    if (fork() == 0)
-    {
-        setsid();
-        execlp(cmd, cmd, NULL);
-        _exit(1);
-    }
-}
-*/
-
 static void workspace_switch(qwm_t *wm, uint16_t new_ws)
 {
     if (!wm) return;
@@ -339,8 +325,14 @@ static void handle_event(qwm_t *qwm, xcb_generic_event_t *event)
     switch (type)
     {
     case XCB_EXPOSE:
-        taskbar_handle_expose(qwm, qwm->taskbar, (xcb_expose_event_t *)event);
-        break;
+    {
+        if (qwm->launcher.opened)
+            launcher_draw(qwm, &qwm->launcher);
+        else
+            taskbar_handle_expose(qwm, qwm->taskbar,
+                                  (xcb_expose_event_t *)event);
+    }
+    break;
     case XCB_CLIENT_MESSAGE:
     {
         xcb_client_message_event_t *cev = (xcb_client_message_event_t *)event;
@@ -351,8 +343,8 @@ static void handle_event(qwm_t *qwm, xcb_generic_event_t *event)
                 xcb_destroy_window(qwm->conn, cev->window);
             }
         }
-        break;
     }
+    break;
     case XCB_MAP_REQUEST:
         handle_map_request(qwm, (xcb_map_request_event_t *)event);
         break;
@@ -537,6 +529,8 @@ void qwm_run(qwm_t *qwm)
 void qwm_kill(qwm_t *qwm)
 {
     if (!qwm) return;
+
+    launcher_kill(&qwm->launcher);
 
     if (qwm->taskbar) taskbar_kill(qwm, qwm->taskbar);
 

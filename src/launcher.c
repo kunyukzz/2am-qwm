@@ -3,22 +3,237 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+#include <unistd.h>   // access, X_OK
+#include <dirent.h>   // DIR, dirent, opendir, closedir
+#include <sys/stat.h> // stat, S_ISREG
 
 #define KEY_ENTER 36
+#define KEY_BACKSPACE 22
+#define KEY_ESCAPE 9
 
-void launcher_init(launcher_t *l) { memset(l, 0, sizeof(*l)); }
+#define KEY_UP 111
+#define KEY_DOWN 116
+
+#define LAUNCHER_LINE_HEIGHT 16
+#define LAUNCHER_PADDING 4
+#define LAUNCHER_MAX_DRAW 8
+
+static char keycode_to_char(uint8_t code);
+
+// clang-format off
+static const char *banned_cmds[] = {
+    "rm", "rmdir", "mkfs", "dd", "sudo", "doas",
+    "chmod", "chown", "chgrp", "truncate",
+
+    "shutdown", "reboot", "halt", "poweroff",
+
+    // package management (qwm not run with root previlage)
+	// but i added if user cheating. hahaha
+    "apt-get", "apt", "dnf", "yum", "pacman", "zypper",
+    "emerge", "xbps",
+
+    // advanced system / network
+    "mount", "umount", "kill", "killall", "pkill",
+    "iptables", "ip6tables", "systemctl", "service", "rfkill",
+
+    // other destructive / low-level
+    "wipe", "shred", "fsck",
+    "mkfs.ext4", "mkfs.fat", "mkfs.ntfs",
+    "ddrescue",
+    NULL
+};
+// clang-format on
+
+static int32_t is_banned(const char *name)
+{
+    if (!name) return 0;
+
+    const char *base = strrchr(name, '/');
+    if (base)
+        base = base + 1;
+    else
+        base = name;
+
+    for (int i = 0; banned_cmds[i]; ++i)
+    {
+        if (strcmp(base, banned_cmds[i]) == 0) return 1;
+    }
+    return 0;
+}
+
+static void launcher_resize(qwm_t *qwm, launcher_t *l)
+{
+    uint32_t lines = 1 + l->match_count;
+    if (lines > 1 + LAUNCHER_MAX_DRAW) lines = 1 + LAUNCHER_MAX_DRAW;
+
+    l->h = (int16_t)(lines * LAUNCHER_LINE_HEIGHT + LAUNCHER_PADDING * 2);
+
+    uint32_t values[] = {(uint32_t)l->h};
+    xcb_configure_window(qwm->conn, l->win, XCB_CONFIG_WINDOW_HEIGHT, values);
+}
+
+static void str_copy(char *dst, const char *src, size_t size)
+{
+    if (size == 0) return;
+    strncpy(dst, src, size - 1);
+    dst[size - 1] = '\0';
+}
+
+static int32_t cmd_exists(launcher_t *l, const char *name)
+{
+    for (uint32_t i = 0; i < l->cmd_count; ++i)
+    {
+        if (strcmp(l->cmds[i].name, name) == 0) return 1;
+    }
+    return 0;
+}
+
+static int32_t ensure_cmd_capacity(launcher_t *l)
+{
+    if (l->cmd_count < l->cmd_cap) return 1;
+
+    uint32_t new_cap = l->cmd_cap ? l->cmd_cap * 2 : 256;
+    cmd_entry_t *new_cmds = realloc(l->cmds, new_cap * sizeof(cmd_entry_t));
+    if (!new_cmds) return 0;
+
+    l->cmds = new_cmds;
+    l->cmd_cap = new_cap;
+    return 1;
+}
+
+static void scan_path(launcher_t *l)
+{
+    const char *path_env = getenv("PATH");
+    if (!path_env) return;
+
+    char pathbuf[4096];
+    str_copy(pathbuf, path_env, sizeof(pathbuf));
+
+    l->cmd_count = 0;
+
+    char *saveptr;
+    char *dir = strtok_r(pathbuf, ":", &saveptr);
+
+    while (dir)
+    {
+        DIR *d = opendir(dir);
+        if (!d)
+        {
+            dir = strtok_r(NULL, ":", &saveptr);
+            continue;
+        }
+
+        struct dirent *ent;
+        while ((ent = readdir(d)))
+        {
+            if (ent->d_name[0] == '.') continue;
+
+            char full[1024];
+            snprintf(full, sizeof(full), "%s/%s", dir, ent->d_name);
+
+            struct stat st;
+            if (stat(full, &st) != 0) continue;
+            if (!S_ISREG(st.st_mode)) continue;
+            if (access(full, X_OK) != 0) continue;
+            if (cmd_exists(l, ent->d_name)) continue;
+
+            if (!ensure_cmd_capacity(l)) goto out;
+
+            str_copy(l->cmds[l->cmd_count].name, ent->d_name,
+                     sizeof(l->cmds[0].name));
+
+            str_copy(l->cmds[l->cmd_count].path, full,
+                     sizeof(l->cmds[0].path));
+
+            l->cmd_count++;
+        }
+
+        closedir(d);
+        dir = strtok_r(NULL, ":", &saveptr);
+    }
+out:
+    printf("scanned %u commands\n", l->cmd_count);
+}
+
+static int simple_match(const char *input, const char *cmd)
+{
+    if (!input[0]) return 1;
+    if (strncmp(cmd, input, strlen(input)) == 0) return 1;
+
+    return strstr(cmd, input) != NULL;
+}
+
+void update_matches(launcher_t *l)
+{
+    l->match_count = 0;
+    l->sel = 0;
+
+    for (uint32_t i = 0; i < l->cmd_count; ++i)
+    {
+        if (!simple_match(l->input, l->cmds[i].name)) continue;
+
+        uint16_t mi = l->match_count;
+        l->match_indices[mi] = (uint16_t)i;
+        l->match_count++;
+
+        if (l->match_count == LAUNCHER_MAX_MATCH) break;
+    }
+}
+
+static void spawn_exec(const char *cmd)
+{
+    if (!cmd || !*cmd) return;
+    if (is_banned(cmd)) return;
+
+    if (fork() == 0)
+    {
+        setsid();
+
+        // execvp, execv, execlp ???????
+        char *argv[] = {(char *)cmd, NULL};
+        execvp(cmd, argv);
+
+        perror("execvp");
+        _exit(1);
+    }
+}
+
+void launcher_init(launcher_t *l)
+{
+    memset(l, 0, sizeof(*l));
+
+    const char *path_env = getenv("PATH");
+    if (path_env) str_copy(l->scanned_path, path_env, sizeof(l->scanned_path));
+
+    scan_path(l);
+}
+
+void launcher_kill(launcher_t *l)
+{
+    free(l->cmds);
+    l->cmds = NULL;
+    l->cmd_cap = 0;
+    l->cmd_count = 0;
+}
 
 void launcher_open(struct qwm_t *qwm, launcher_t *l)
 {
     l->opened = 0;
+    l->input_len = 0;
+    l->input[0] = '\0';
+    l->match_count = 0;
+
     l->w = 400;
     l->h = 24;
     l->x = (qwm->w - l->w) / 2;
     l->y = 50;
 
     // clang-format off
+	uint32_t gray = 0x444444;
     uint32_t mask = XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK;
-    uint32_t values[3] = {qwm->screen->white_pixel, 1, XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_EXPOSURE};
+    uint32_t values[3] = {gray, 1, XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_EXPOSURE};
 
     l->win = xcb_generate_id(qwm->conn);
     xcb_create_window(qwm->conn, XCB_COPY_FROM_PARENT, l->win, qwm->root,
@@ -28,20 +243,28 @@ void launcher_open(struct qwm_t *qwm, launcher_t *l)
 					  XCB_WINDOW_CLASS_INPUT_OUTPUT,
                       qwm->screen->root_visual, mask, values);
 
-    uint32_t stack_values[] = {
-		XCB_NONE,
-        XCB_STACK_MODE_ABOVE // stack mode: above sibling
-    };
-    xcb_configure_window(qwm->conn, l->win, XCB_CONFIG_WINDOW_SIBLING | XCB_CONFIG_WINDOW_STACK_MODE, stack_values);
+    uint32_t stack_values[] = {XCB_NONE, XCB_STACK_MODE_ABOVE};
+    xcb_configure_window(qwm->conn, l->win,
+						 XCB_CONFIG_WINDOW_SIBLING | XCB_CONFIG_WINDOW_STACK_MODE,
+						 stack_values);
     // clang-format on
 
     xcb_map_window(qwm->conn, l->win);
     xcb_set_input_focus(qwm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, l->win,
                         XCB_CURRENT_TIME);
 
+    l->sel_text_gc = xcb_generate_id(qwm->conn);
+    uint32_t bg_values[] = {0x808080};
+    xcb_create_gc(qwm->conn, l->sel_text_gc, l->win, XCB_GC_FOREGROUND,
+                  bg_values);
+
+    l->text_gc = xcb_generate_id(qwm->conn);
+    uint32_t text_values[] = {qwm->screen->white_pixel, 0x808080};
+    xcb_create_gc(qwm->conn, l->text_gc, l->win,
+                  XCB_GC_FOREGROUND | XCB_GC_BACKGROUND, text_values);
+
     xcb_flush(qwm->conn);
     l->opened = 1;
-    printf("launcher open\n");
 }
 
 void launcher_close(struct qwm_t *qwm, launcher_t *l)
@@ -56,24 +279,169 @@ void launcher_close(struct qwm_t *qwm, launcher_t *l)
     l->win = 0;
     l->input_len = 0;
     l->match_count = 0;
-    printf("launcher closed\n");
+    l->opened = 0;
+}
+
+void launcher_draw(struct qwm_t *qwm, launcher_t *l)
+{
+    if (!l->opened) return;
+
+    xcb_clear_area(qwm->conn, 0, l->win, 0, 0, (uint16_t)l->w, (uint16_t)l->h);
+
+    int y = LAUNCHER_PADDING + LAUNCHER_LINE_HEIGHT;
+
+    xcb_image_text_8(qwm->conn, (uint8_t)strlen(l->input), l->win,
+                     qwm->taskbar->gc, 8, 16, l->input);
+
+    // draw matches below
+    uint32_t draw_count = l->match_count;
+    if (draw_count > LAUNCHER_MAX_DRAW) draw_count = LAUNCHER_MAX_DRAW;
+
+    for (uint32_t i = 0; i < draw_count; ++i)
+    {
+        uint16_t idx = l->match_indices[i];
+        const char *name = l->cmds[idx].name;
+
+        y += LAUNCHER_LINE_HEIGHT;
+
+        // selection background
+        if (i == l->sel)
+        {
+            xcb_rectangle_t r = {.x = 0,
+                                 .y = (int16_t)(y - LAUNCHER_LINE_HEIGHT + 4),
+                                 .width = (uint16_t)l->w,
+                                 .height = (uint16_t)LAUNCHER_LINE_HEIGHT};
+
+            xcb_poly_fill_rectangle(qwm->conn, l->win, l->sel_text_gc, 1, &r);
+        }
+
+        xcb_gcontext_t gc = (i == l->sel) ? l->text_gc : qwm->taskbar->gc;
+
+        xcb_image_text_8(qwm->conn, (uint8_t)strlen(name), l->win, gc,
+                         LAUNCHER_PADDING, (int16_t)y, name);
+    }
+
+    xcb_flush(qwm->conn);
 }
 
 void launcher_handle_event(struct qwm_t *qwm, launcher_t *l,
                            xcb_generic_event_t *ev)
 {
     if (!qwm || !l || !ev) return;
-
     if ((ev->response_type & 0x7f) != XCB_KEY_PRESS) return;
 
     xcb_key_press_event_t *kp = (xcb_key_press_event_t *)ev;
     uint8_t code = kp->detail;
 
-    // Only ENTER closes the launcher for now
+    if (code == KEY_ESCAPE) launcher_close(qwm, l);
+
     if (code == KEY_ENTER)
     {
+        if (l->match_count > 0)
+        {
+            uint16_t idx = l->match_indices[l->sel];
+            if (!is_banned(l->cmds[idx].path)) spawn_exec(l->cmds[idx].path);
+        }
+        else if (l->input_len > 0)
+        {
+            spawn_exec(l->input);
+        }
+
         launcher_close(qwm, l);
-        qwm->launcher.opened = 0;
+        return;
+    }
+
+    if (code == KEY_DOWN)
+    {
+        if (l->match_count > 0)
+        {
+            if (l->sel + 1 < l->match_count) l->sel++;
+        }
+        launcher_draw(qwm, l);
+        return;
+    }
+
+    if (code == KEY_UP)
+    {
+        if (l->match_count > 0)
+        {
+            if (l->sel > 0) l->sel--;
+        }
+        launcher_draw(qwm, l);
+        return;
+    }
+
+    if (code == KEY_BACKSPACE)
+    {
+        if (l->input_len > 0)
+        {
+            l->input[--l->input_len] = '\0';
+            update_matches(l);
+            launcher_resize(qwm, l);
+            launcher_draw(qwm, l);
+        }
+        return;
+    }
+
+    char ch = keycode_to_char(code);
+    if (ch && l->input_len < sizeof(l->input) - 1)
+    {
+        l->input[l->input_len++] = ch;
+        l->input[l->input_len] = '\0';
+
+        update_matches(l);
+        launcher_resize(qwm, l);
+        launcher_draw(qwm, l);
         return;
     }
 }
+
+// TODO: revisit this later!!
+static char keycode_to_char(uint8_t code)
+{
+    switch (code)
+    {
+    case 38: return 'a';
+    case 56: return 'b';
+    case 54: return 'c';
+    case 40: return 'd';
+    case 26: return 'e';
+    case 41: return 'f';
+    case 42: return 'g';
+    case 43: return 'h';
+    case 31: return 'i';
+    case 44: return 'j';
+    case 45: return 'k';
+    case 46: return 'l';
+    case 58: return 'm';
+    case 57: return 'n';
+    case 32: return 'o';
+    case 33: return 'p';
+    case 24: return 'q';
+    case 27: return 'r';
+    case 39: return 's';
+    case 28: return 't';
+    case 30: return 'u';
+    case 55: return 'v';
+    case 25: return 'w';
+    case 53: return 'x';
+    case 29: return 'y';
+    case 52: return 'z';
+
+    case 10: return '1';
+    case 11: return '2';
+    case 12: return '3';
+    case 13: return '4';
+    case 14: return '5';
+    case 15: return '6';
+    case 16: return '7';
+    case 17: return '8';
+    case 18: return '9';
+    case 19: return '0';
+    case 20: return '-';
+
+    case 65: return ' ';
+    default: return 0;
+    }
+}
+

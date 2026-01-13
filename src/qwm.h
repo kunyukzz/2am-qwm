@@ -9,7 +9,6 @@
 #include "client.h"
 #include "views.h"
 #include "tray_status.h"
-
 #include "launcher.h"
 
 typedef struct qwm_t qwm_t;
@@ -42,9 +41,7 @@ struct qwm_t {
 
     taskbar_t *taskbar;
     tray_status_t tray;
-
     launcher_t launcher;
-    // int8_t launcher_opened;
 
     const keybind_t *keybinds;
     uint64_t keybind_count;

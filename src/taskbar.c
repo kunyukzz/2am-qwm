@@ -132,7 +132,7 @@ taskbar_t *taskbar_init(struct qwm_t *qwm)
     taskbar_t *tb = calloc(1, sizeof(taskbar_t));
     if (!tb) return NULL;
 
-    tb->height = 25;
+    tb->height = 24;
     tb->width = qwm->w;
     tb->y_pos = qwm->screen->height_in_pixels - tb->height;
     tb->right_x = tb->width - RIGHT_PAD;
@@ -149,10 +149,7 @@ taskbar_t *taskbar_init(struct qwm_t *qwm)
         0, // border
         XCB_WINDOW_CLASS_INPUT_OUTPUT, qwm->screen->root_visual, mask, values);
 
-    uint32_t stack_values[] = {
-        XCB_NONE,
-        XCB_STACK_MODE_ABOVE // stack mode: above sibling
-    };
+    uint32_t stack_values[] = {XCB_NONE, XCB_STACK_MODE_ABOVE};
     xcb_configure_window(qwm->conn, tb->win,
                          XCB_CONFIG_WINDOW_SIBLING | XCB_CONFIG_WINDOW_STACK_MODE,
                          stack_values);

@@ -5,7 +5,6 @@
 
 struct qwm_t;
 
-#define LAUNCHER_CMD_LIMIT 128
 #define LAUNCHER_MAX_INPUT 64
 #define LAUNCHER_MAX_MATCH 5
 
@@ -15,25 +14,35 @@ typedef struct {
 } cmd_entry_t;
 
 typedef struct {
+    xcb_gcontext_t sel_text_gc;
+    xcb_gcontext_t text_gc;
+
     xcb_window_t win;
     int16_t x, y, w, h;
     uint8_t opened;
+    char scanned_path[4096];
 
     char input[LAUNCHER_MAX_INPUT];
     uint32_t input_len;
 
-    cmd_entry_t cmds[LAUNCHER_CMD_LIMIT];
+    cmd_entry_t *cmds;
     uint32_t cmd_count;
+    uint32_t cmd_cap;
 
     uint16_t match_indices[LAUNCHER_MAX_MATCH];
     uint16_t match_count;
+    uint16_t sel;
 } launcher_t;
 
 void launcher_init(launcher_t *l);
 
+void launcher_kill(launcher_t *l);
+
 void launcher_open(struct qwm_t *qwm, launcher_t *l);
 
 void launcher_close(struct qwm_t *qwm, launcher_t *l);
+
+void launcher_draw(struct qwm_t *qwm, launcher_t *l);
 
 void launcher_handle_event(struct qwm_t *qwm, launcher_t *l,
                            xcb_generic_event_t *ev);
