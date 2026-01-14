@@ -20,6 +20,7 @@ void client_kill(struct qwm_t *wm, client_t *c);
 void client_configure(struct qwm_t *wm, client_t *c, uint32_t x, uint32_t y,
                       uint32_t w, uint32_t h);
 
+// NOTE: this for window decoration - but it seems unstable
 // void client_add_overlay(struct qwm_t *wm, client_t *c);
 
 void client_set_focus(struct qwm_t *wm, client_t *c, int32_t focused);

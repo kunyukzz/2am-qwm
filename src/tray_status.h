@@ -62,6 +62,7 @@ typedef struct {
     connect_state_t cn_state;
     connect_type_t cn_type;
     char name[32];
+    time_t last_update;
 } connection_t;
 
 typedef struct {

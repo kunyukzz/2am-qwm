@@ -5,24 +5,14 @@
 #    define _POSIX_C_SOURCE 200809L
 #endif
 
+#include "config.h" // IWYU pragma: keep
 #include "taskbar.h"
 #include "client.h"
 #include "views.h"
 #include "tray_status.h"
 #include "launcher.h"
 
-#define BORDER_WIDTH 2
-
-#define COLOR_FOCUS 0xff0000 // red
-#define COLOR_UNFOCUS 0x222222
-
 typedef struct qwm_t qwm_t;
-
-typedef struct {
-    uint16_t mod;
-    xcb_keycode_t key;
-    void (*func)(qwm_t *);
-} keybind_t;
 
 // NOTE: some of these may be not using it
 typedef struct {

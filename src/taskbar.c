@@ -138,9 +138,8 @@ taskbar_t *taskbar_init(struct qwm_t *qwm)
     tb->right_x = tb->width - RIGHT_PAD;
 
     // clang-format off
-	uint32_t gray = 0x444444;
     uint32_t mask = XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK;
-    uint32_t values[3] = {gray, 1, XCB_EVENT_MASK_EXPOSURE};
+    uint32_t values[3] = {TASKBAR_COLOR, 1, XCB_EVENT_MASK_EXPOSURE};
 
 	tb->win = xcb_generate_id(qwm->conn);
     xcb_create_window(qwm->conn, XCB_COPY_FROM_PARENT, tb->win, qwm->root,
@@ -170,11 +169,7 @@ taskbar_t *taskbar_init(struct qwm_t *qwm)
 
     // setup graphics context
     tb->gc = xcb_generate_id(qwm->conn);
-    uint32_t gc_values[] = {
-        qwm->screen->white_pixel, // foreground color
-        gray,                     // background color
-        tb->font                  // font
-    };
+    uint32_t gc_values[] = {TASKBAR_FONT_COLOR, TASKBAR_COLOR, tb->font};
     xcb_create_gc(qwm->conn, tb->gc, tb->win,
                   XCB_GC_FOREGROUND | XCB_GC_BACKGROUND | XCB_GC_FONT,
                   gc_values);

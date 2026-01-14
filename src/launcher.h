@@ -5,8 +5,8 @@
 
 struct qwm_t;
 
-#define LAUNCHER_MAX_INPUT 64
-#define LAUNCHER_MAX_MATCH 5
+#define MAX_INPUT 64
+#define MAX_MATCH 5
 
 typedef struct {
     char name[64];
@@ -22,14 +22,14 @@ typedef struct {
     uint8_t opened;
     char scanned_path[4096];
 
-    char input[LAUNCHER_MAX_INPUT];
+    char input[MAX_INPUT];
     uint32_t input_len;
 
     cmd_entry_t *cmds;
     uint32_t cmd_count;
     uint32_t cmd_cap;
 
-    uint16_t match_indices[LAUNCHER_MAX_MATCH];
+    uint16_t match_indices[MAX_MATCH];
     uint16_t match_count;
     uint16_t sel;
 } launcher_t;

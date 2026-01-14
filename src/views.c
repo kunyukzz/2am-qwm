@@ -12,10 +12,10 @@ static void layout_monocle(struct qwm_t *wm, uint16_t ws)
     workspace_t *w = &wm->workspaces[ws];
     if (!w->clients) return;
 
-    uint32_t x = BW;
-    uint32_t y = BW;
-    uint32_t width = wm->w - 2 * BW;
-    uint32_t height = wm->h - BAR - 2 * BW;
+    uint32_t x = BW - 1;
+    uint32_t y = BW - 1;
+    uint32_t width = wm->w - 3 * BW;
+    uint32_t height = wm->h - BAR - 3 * BW;
 
     if (width < MIN_W || height < MIN_H) return;
 
@@ -75,7 +75,7 @@ static void layout_tile(struct qwm_t *wm, uint16_t ws)
 
     if (n == 1)
     {
-        uint32_t v[] = {BW, BW, full_w - 2 * BW, full_h - 2 * BW};
+        uint32_t v[] = {BW - 1, BW - 1, full_w - 3 * BW, full_h - 3 * BW};
         xcb_configure_window(wm->conn, c->win, mask, v);
         return;
     }
@@ -83,7 +83,7 @@ static void layout_tile(struct qwm_t *wm, uint16_t ws)
     uint32_t master_w = full_w / 2;
     if (master_w < MIN_W) master_w = full_w;
 
-    uint32_t master[] = {BW, BW, master_w - 2 * BW, full_h - 2 * BW};
+    uint32_t master[] = {BW - 1, BW - 1, master_w - 3 * BW, full_h - 3 * BW};
     xcb_configure_window(wm->conn, c->win, mask, master);
 
     uint32_t stack_n = n - 1;
@@ -93,8 +93,8 @@ static void layout_tile(struct qwm_t *wm, uint16_t ws)
     uint32_t y = 0;
     for (c = c->next; c; c = c->next)
     {
-        uint32_t v[] = {master_w + BW, y + BW, full_w - master_w - 2 * BW,
-                        stack_h - 2 * BW};
+        uint32_t v[] = {master_w + BW - 1, y + BW - 1,
+                        full_w - master_w - 3 * BW, stack_h - 3 * BW};
         xcb_configure_window(wm->conn, c->win, mask, v);
         y += stack_h;
     }

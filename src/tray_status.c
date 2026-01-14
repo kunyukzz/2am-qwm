@@ -62,6 +62,42 @@ static int32_t get_active_connection(char *name, size_t namesz, char *type,
     return ret;
 }
 
+static int32_t get_cached_connection(char *name, size_t namesz, char *type,
+                                     size_t typesz)
+{
+    static struct {
+        char name[32];
+        char type[16];
+        int result; // 0=connected, -1=disconnected
+        time_t last_update;
+    } cache = {.last_update = 0};
+
+    time_t now = time(NULL);
+
+    // Cache hit (1 hour)
+    if (now - cache.last_update < 3600 && cache.last_update != 0)
+    {
+        strncpy(name, cache.name, namesz - 1);
+        name[namesz - 1] = '\0';
+        strncpy(type, cache.type, typesz - 1);
+        type[typesz - 1] = '\0';
+        return cache.result;
+    }
+
+    // Cache miss - call original
+    int32_t result = get_active_connection(name, namesz, type, typesz);
+
+    // Update cache
+    strncpy(cache.name, name, sizeof(cache.name) - 1);
+    cache.name[sizeof(cache.name) - 1] = '\0';
+    strncpy(cache.type, type, sizeof(cache.type) - 1);
+    cache.type[sizeof(cache.type) - 1] = '\0';
+    cache.result = result;
+    cache.last_update = now;
+
+    return result;
+}
+
 static int32_t update_connection(connection_t *conn)
 {
     char name[32] = {0};
@@ -69,7 +105,10 @@ static int32_t update_connection(connection_t *conn)
     connect_state_t new_state = DISCONNECT;
     connect_type_t new_type = UNKNOWN;
 
-    if (get_active_connection(name, sizeof(name), type, sizeof(type)) == 0)
+    // NOTE: if not have network manager - this was become empty
+    // because relied connection from network manager since kernel not exposed
+    // wifi SSID to public (Network Manager already run on root previlage)
+    if (get_cached_connection(name, sizeof(name), type, sizeof(type)) == 0)
     {
         new_state = CONNECT;
         if (strcmp(type, "802-11-wireless") == 0)
@@ -146,6 +185,13 @@ static int32_t update_clock(time_date_t *td)
 
 static int32_t update_governor(governor_t *g)
 {
+    static time_t last_check = 0;
+    time_t now = time(NULL);
+
+    // 10 minutes
+    if (now - last_check < 600 && last_check != 0) return 0;
+    last_check = now;
+
     char buf[16];
 
     if (file_read_string(CPU_GOV_PATH, buf, sizeof(buf)) < 0) return 0;
@@ -243,33 +289,46 @@ static int32_t update_memory(memory_t *mem)
 
 static int32_t update_battery_status(battery_t *bat)
 {
-    int cap;
-    if (file_read_int(BAT_CAPACITY, &cap) == 0)
+    static time_t last_cap_check = 0;
+    static time_t last_status_check = 0;
+    time_t now = time(NULL);
+
+    // Check capacity every 5 minutes
+    if (now - last_cap_check >= 300 || last_cap_check == 0)
     {
-        uint16_t new_cap = (uint16_t)cap;
-        if (new_cap != bat->capacity)
+        last_cap_check = now;
+        int cap;
+        if (file_read_int(BAT_CAPACITY, &cap) == 0)
         {
-            bat->capacity = new_cap;
-            return 1;
+            uint16_t new_cap = (uint16_t)cap;
+            if (new_cap != bat->capacity)
+            {
+                bat->capacity = new_cap;
+                return 1;
+            }
         }
     }
 
-    char buf[16];
-    if (file_read_string(BAT_STATUS, buf, sizeof(buf)) == 0)
+    // Check status more often - every 10 seconds
+    if (now - last_status_check >= 10 || last_status_check == 0)
     {
-        battery_state_t new_state = BAT_UNKNOWN;
-
-        if (strcmp(buf, "Charging") == 0)
-            new_state = BAT_CHARGING;
-        else if (strcmp(buf, "Discharging") == 0)
-            new_state = BAT_DISCHARGING;
-        else if (strcmp(buf, "Full") == 0)
-            new_state = BAT_FULL;
-
-        if (new_state != bat->state)
+        last_status_check = now;
+        char buf[16];
+        if (file_read_string(BAT_STATUS, buf, sizeof(buf)) == 0)
         {
-            bat->state = new_state;
-            return 1;
+            battery_state_t new_state = BAT_UNKNOWN;
+            if (strcmp(buf, "Charging") == 0)
+                new_state = BAT_CHARGING;
+            else if (strcmp(buf, "Discharging") == 0)
+                new_state = BAT_DISCHARGING;
+            else if (strcmp(buf, "Full") == 0)
+                new_state = BAT_FULL;
+
+            if (new_state != bat->state)
+            {
+                bat->state = new_state;
+                return 1;
+            }
         }
     }
 
@@ -278,10 +337,17 @@ static int32_t update_battery_status(battery_t *bat)
 
 static int32_t update_uptime(uptime_t *up)
 {
+    static time_t last_check = 0;
+    time_t now = time(NULL);
+
+    // 1 minutes
+    if (now - last_check < 60 && last_check != 0) return 0;
+    last_check = now;
+
     double seconds;
     if (file_read_double("/proc/uptime", &seconds) < 0) return 0;
 
-    uint64_t minutes = (uint64_t)(seconds / 60);
+    uint64_t minutes = (uint64_t)seconds / 60;
     if (minutes != up->current)
     {
         up->last = up->current;
@@ -304,15 +370,28 @@ int32_t tray_update(struct qwm_t *wm, tray_status_t *ts)
 
     dirty |= update_workspace(wm, &ts->view);
 
+    // printf("  Calling update_clock...\n");
     dirty |= update_clock(&ts->time_date);
+
+    // printf("  Calling update_governor...\n");
     dirty |= update_governor(&ts->gov);
+
+    // printf("  Calling update_cpu_freq...\n");
     dirty |= update_cpu_freq(&ts->cpu);
+
+    // printf("  Calling update_memory...\n");
     dirty |= update_memory(&ts->mems);
+
+    // printf("  Calling update_battery_status...\n");
     dirty |= update_battery_status(&ts->bat);
+
+    // printf("  Calling update_uptime...\n");
     dirty |= update_uptime(&ts->up);
 
+    // printf("  Calling update_connection...\n");
     dirty |= update_connection(&ts->connection);
 
+    // printf("  Returning dirty=%d\n\n", dirty);
     return dirty;
 }
 

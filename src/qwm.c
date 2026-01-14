@@ -8,19 +8,21 @@
 #include <unistd.h> // fork, setsid, execlp, _exit
 #include <poll.h>   // struct pollfd, POLL_IN
 
+#include <xcb/xcb_keysyms.h>
+
 static void handle_child_signal(int sig)
 {
     (void)sig;
     while (waitpid(-1, NULL, WNOHANG) > 0);
 }
 
-static void quit_wm(qwm_t *qwm)
+void quit_wm(struct qwm_t *qwm)
 {
     qwm_kill(qwm);
     exit(0);
 }
 
-static void quit_client_focused(qwm_t *wm)
+void quit_application(struct qwm_t *wm)
 {
     if (!wm) return;
 
@@ -35,40 +37,14 @@ static void quit_client_focused(qwm_t *wm)
     xcb_kill_client(wm->conn, c->win);
 }
 
-static void spawn_kitty(qwm_t *qwm)
+void spawn_launcher(qwm_t *qwm)
 {
-    (void)qwm;
-    if (fork() == 0)
-    {
-        setsid();
-        execlp("kitty", "kitty", NULL);
-        _exit(1);
-    }
+    if (qwm->launcher.opened) return;
+    launcher_open(qwm, &qwm->launcher);
+    qwm->launcher.opened = 1;
 }
 
-static void spawn_xfce_term(qwm_t *qwm)
-{
-    (void)qwm;
-    if (fork() == 0)
-    {
-        setsid();
-        execlp("xfce4-terminal", "xfce4-terminal", NULL);
-        _exit(1);
-    }
-}
-
-static void spawn_vlc(qwm_t *qwm)
-{
-    (void)qwm;
-    if (fork() == 0)
-    {
-        setsid();
-        execlp("vlc", "vlc", NULL);
-        _exit(1);
-    }
-}
-
-void spawn_app(const char *name)
+void spawn(const char *name)
 {
     if (fork() == 0)
     {
@@ -76,19 +52,6 @@ void spawn_app(const char *name)
         execlp(name, name, NULL);
         _exit(1);
     }
-}
-
-static void spawn(qwm_t *qwm, const char *name)
-{
-    (void)qwm;
-    spawn_app(name);
-}
-
-static void spawn_launcher(qwm_t *qwm)
-{
-    if (qwm->launcher.opened) return;
-    launcher_open(qwm, &qwm->launcher);
-    qwm->launcher.opened = 1;
 }
 
 static void workspace_switch(qwm_t *wm, uint16_t new_ws)
@@ -118,7 +81,7 @@ static void workspace_switch(qwm_t *wm, uint16_t new_ws)
     }
 }
 
-static void toggle_layout(qwm_t *wm)
+void toggle_layout(struct qwm_t *wm)
 {
     workspace_t *w = &wm->workspaces[wm->current_ws];
     w->type = (w->type + 1) % 3;
@@ -126,7 +89,7 @@ static void toggle_layout(qwm_t *wm)
     layout_apply(wm, wm->current_ws);
 }
 
-static void focus_next(qwm_t *wm)
+void focus_next(struct qwm_t *wm)
 {
     workspace_t *ws = &wm->workspaces[wm->current_ws];
     if (!ws->focused) return;
@@ -146,7 +109,7 @@ static void focus_next(qwm_t *wm)
                          XCB_CONFIG_WINDOW_STACK_MODE, v);
 }
 
-static void focus_prev(qwm_t *wm)
+void focus_prev(struct qwm_t *wm)
 {
     workspace_t *ws = &wm->workspaces[wm->current_ws];
     if (!ws->focused || !ws->clients) return;
@@ -179,7 +142,7 @@ static void focus_prev(qwm_t *wm)
                          XCB_CONFIG_WINDOW_STACK_MODE, v);
 }
 
-void swap_master(qwm_t *wm)
+void swap_master(struct qwm_t *wm)
 {
     workspace_t *w = &wm->workspaces[wm->current_ws];
     client_t *f = w->focused;
@@ -202,35 +165,64 @@ void swap_master(qwm_t *wm)
     layout_apply(wm, wm->current_ws);
 }
 
-static void ws_1(qwm_t *qwm) { workspace_switch(qwm, 0); }
-static void ws_2(qwm_t *qwm) { workspace_switch(qwm, 1); }
-static void ws_3(qwm_t *qwm) { workspace_switch(qwm, 2); }
-static void ws_4(qwm_t *qwm) { workspace_switch(qwm, 3); }
-static void ws_5(qwm_t *qwm) { workspace_switch(qwm, 4); }
+static void move_to_new_ws(qwm_t *wm, client_t *c, uint16_t dst)
+{
+    if (!wm || !c) return;
+    if (dst >= WORKSPACE_COUNT) return;
 
-// TODO: make this generic & configureable
-static const keybind_t std_keybinds[] = {
-    {KEY_ALT, KEY_Q, quit_wm},
-    {KEY_ALT, KEY_W, quit_client_focused},
+    uint16_t src = c->workspace;
+    if (src == dst) return;
 
-    {KEY_ALT, KEY_T, spawn_kitty},
-    {KEY_ALT, KEY_ENTER, spawn_xfce_term},
-    {KEY_ALT, KEY_V, spawn_vlc},
+    workspace_t *ws_src = &wm->workspaces[src];
+    workspace_t *ws_dst = &wm->workspaces[dst];
 
-    {KEY_ALT, KEY_O, toggle_layout},
-    {KEY_ALT, KEY_J, focus_next},
-    {KEY_ALT, KEY_K, focus_prev},
-    {KEY_ALT, KEY_S, swap_master},
+    client_t **pc = &ws_src->clients;
+    while (*pc)
+    {
+        if (*pc == c)
+        {
+            *pc = c->next;
+            break;
+        }
+        pc = &(*pc)->next;
+    }
 
-    {KEY_ALT, KEY_1, ws_1},
-    {KEY_ALT, KEY_2, ws_2},
-    {KEY_ALT, KEY_3, ws_3},
-    {KEY_ALT, KEY_4, ws_4},
-    {KEY_ALT, KEY_5, ws_5},
+    if (ws_src->focused == c) ws_src->focused = ws_src->clients;
 
-    {KEY_ALT, KEY_SPACE, spawn_launcher},
-    // TODO: add another things
-};
+    // insert into destination list (head)
+    c->next = ws_dst->clients;
+    ws_dst->clients = c;
+    ws_dst->focused = c;
+
+    c->workspace = dst;
+
+    if (wm->current_ws != dst) xcb_unmap_window(wm->conn, c->win);
+
+    layout_apply(wm, src);
+    layout_apply(wm, dst);
+
+    xcb_flush(wm->conn);
+}
+
+static void move_focused_to_ws(qwm_t *wm, uint16_t ws)
+{
+    workspace_t *w = &wm->workspaces[wm->current_ws];
+    if (!w->focused) return;
+
+    move_to_new_ws(wm, w->focused, ws);
+}
+
+void workspace_1(struct qwm_t *qwm) { workspace_switch(qwm, 0); }
+void workspace_2(struct qwm_t *qwm) { workspace_switch(qwm, 1); }
+void workspace_3(struct qwm_t *qwm) { workspace_switch(qwm, 2); }
+void workspace_4(struct qwm_t *qwm) { workspace_switch(qwm, 3); }
+void workspace_5(struct qwm_t *qwm) { workspace_switch(qwm, 4); }
+
+void move_to_workspace_1(struct qwm_t *qwm) { move_focused_to_ws(qwm, 0); }
+void move_to_workspace_2(struct qwm_t *qwm) { move_focused_to_ws(qwm, 1); }
+void move_to_workspace_3(struct qwm_t *qwm) { move_focused_to_ws(qwm, 2); }
+void move_to_workspace_4(struct qwm_t *qwm) { move_focused_to_ws(qwm, 3); }
+void move_to_workspace_5(struct qwm_t *qwm) { move_focused_to_ws(qwm, 4); }
 
 static void handle_map_request(qwm_t *wm, xcb_map_request_event_t *ev)
 {
@@ -443,17 +435,18 @@ static void handle_event(qwm_t *qwm, xcb_generic_event_t *event)
             return;
         }
 
+        uint16_t state = kev->state & ~(XCB_MOD_MASK_LOCK | XCB_MOD_MASK_2);
         for (size_t i = 0; i < qwm->keybind_count; ++i)
         {
             if (kev->detail == qwm->keybinds[i].key &&
-                (kev->state & qwm->keybinds[i].mod) == qwm->keybinds[i].mod)
+                (state == qwm->keybinds[i].mod))
             {
                 qwm->keybinds[i].func(qwm);
                 break;
             }
         }
+        break;
     }
-    break;
 
     default: break;
     }
@@ -546,13 +539,19 @@ qwm_t *qwm_init(void)
                         sizeof(supported) / sizeof(xcb_atom_t), supported);
 
     // setup keybinding
-    qwm->keybinds = std_keybinds;
-    qwm->keybind_count = sizeof(std_keybinds) / sizeof(std_keybinds[0]);
-    for (uint64_t i = 0; i < qwm->keybind_count; ++i)
+    qwm->keybinds = my_keybinds;
+    qwm->keybind_count = sizeof(my_keybinds) / sizeof(my_keybinds[0]);
+    static const uint16_t lock_masks[] = {0, XCB_MOD_MASK_LOCK, XCB_MOD_MASK_2,
+                                          XCB_MOD_MASK_LOCK | XCB_MOD_MASK_2};
+
+    for (size_t i = 0; i < sizeof(my_keybinds) / sizeof(my_keybinds[0]); ++i)
     {
-        xcb_grab_key(qwm->conn, 1, qwm->root, qwm->keybinds[i].mod,
-                     qwm->keybinds[i].key, XCB_GRAB_MODE_ASYNC,
-                     XCB_GRAB_MODE_ASYNC);
+        for (size_t j = 0; j < 4; ++j)
+        {
+            xcb_grab_key(
+                qwm->conn, 1, qwm->root, my_keybinds[i].mod | lock_masks[j],
+                my_keybinds[i].key, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+        }
     }
 
     // setup taskbar

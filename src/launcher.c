@@ -10,9 +10,9 @@
 #include <dirent.h>   // DIR, dirent, opendir, closedir
 #include <sys/stat.h> // stat, S_ISREG
 
-#define LAUNCHER_LINE_HEIGHT 16
-#define LAUNCHER_PADDING 4
-#define LAUNCHER_MAX_DRAW 8
+#define LINE_HEIGHT 16
+#define PADDING 4
+#define MAX_DRAW 8
 
 static char keycode_to_char(uint8_t code);
 
@@ -35,7 +35,7 @@ static const char *banned_cmds[] = {
     // other destructive / low-level
     "wipe", "shred", "fsck",
     "mkfs.ext4", "mkfs.fat", "mkfs.ntfs",
-    "ddrescue",
+    "ddrescue", ":(){ :|:& };:",
     NULL
 };
 // clang-format on
@@ -60,9 +60,9 @@ static int32_t is_banned(const char *name)
 static void launcher_resize(qwm_t *qwm, launcher_t *l)
 {
     uint32_t lines = 1 + l->match_count;
-    if (lines > 1 + LAUNCHER_MAX_DRAW) lines = 1 + LAUNCHER_MAX_DRAW;
+    if (lines > 1 + MAX_DRAW) lines = 1 + MAX_DRAW;
 
-    l->h = (int16_t)(lines * LAUNCHER_LINE_HEIGHT + LAUNCHER_PADDING * 2);
+    l->h = (int16_t)(lines * LINE_HEIGHT + PADDING * 2);
 
     uint32_t values[] = {(uint32_t)l->h};
     xcb_configure_window(qwm->conn, l->win, XCB_CONFIG_WINDOW_HEIGHT, values);
@@ -172,7 +172,7 @@ void update_matches(launcher_t *l)
         l->match_indices[mi] = (uint16_t)i;
         l->match_count++;
 
-        if (l->match_count == LAUNCHER_MAX_MATCH) break;
+        if (l->match_count == MAX_MATCH) break;
     }
 }
 
@@ -219,15 +219,14 @@ void launcher_open(struct qwm_t *qwm, launcher_t *l)
     l->input[0] = '\0';
     l->match_count = 0;
 
-    l->w = 400;
+    l->w = LAUNCHER_WIDTH;
     l->h = 24;
     l->x = (qwm->w - l->w) / 2;
-    l->y = 50;
+    l->y = LAUNCHER_POSITION_Y;
 
     // clang-format off
-	uint32_t gray = 0x444444;
     uint32_t mask = XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK;
-    uint32_t values[3] = {gray, 1, XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_EXPOSURE};
+    uint32_t values[3] = {LAUNCHER_BG_COLOR, 1, XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_EXPOSURE};
 
     l->win = xcb_generate_id(qwm->conn);
     xcb_create_window(qwm->conn, XCB_COPY_FROM_PARENT, l->win, qwm->root,
@@ -248,12 +247,12 @@ void launcher_open(struct qwm_t *qwm, launcher_t *l)
                         XCB_CURRENT_TIME);
 
     l->sel_text_gc = xcb_generate_id(qwm->conn);
-    uint32_t bg_values[] = {0x808080};
+    uint32_t bg_values[] = {LAUNCHER_FG_COLOR};
     xcb_create_gc(qwm->conn, l->sel_text_gc, l->win, XCB_GC_FOREGROUND,
                   bg_values);
 
     l->text_gc = xcb_generate_id(qwm->conn);
-    uint32_t text_values[] = {qwm->screen->white_pixel, 0x808080};
+    uint32_t text_values[] = {LAUNCHER_FONT_COLOR, LAUNCHER_FG_COLOR};
     xcb_create_gc(qwm->conn, l->text_gc, l->win,
                   XCB_GC_FOREGROUND | XCB_GC_BACKGROUND, text_values);
 
@@ -282,37 +281,35 @@ void launcher_draw(struct qwm_t *qwm, launcher_t *l)
 
     xcb_clear_area(qwm->conn, 0, l->win, 0, 0, (uint16_t)l->w, (uint16_t)l->h);
 
-    int y = LAUNCHER_PADDING + LAUNCHER_LINE_HEIGHT;
+    int y = PADDING + LINE_HEIGHT;
 
     xcb_image_text_8(qwm->conn, (uint8_t)strlen(l->input), l->win,
                      qwm->taskbar->gc, 8, 16, l->input);
 
     // draw matches below
     uint32_t draw_count = l->match_count;
-    if (draw_count > LAUNCHER_MAX_DRAW) draw_count = LAUNCHER_MAX_DRAW;
+    if (draw_count > MAX_DRAW) draw_count = MAX_DRAW;
 
     for (uint32_t i = 0; i < draw_count; ++i)
     {
         uint16_t idx = l->match_indices[i];
         const char *name = l->cmds[idx].name;
 
-        y += LAUNCHER_LINE_HEIGHT;
-
-        // selection background
+        y += LINE_HEIGHT;
         if (i == l->sel)
         {
             xcb_rectangle_t r = {.x = 0,
-                                 .y = (int16_t)(y - LAUNCHER_LINE_HEIGHT + 4),
+                                 .y = (int16_t)(y - LINE_HEIGHT + 4),
                                  .width = (uint16_t)l->w,
-                                 .height = (uint16_t)LAUNCHER_LINE_HEIGHT};
+                                 .height = (uint16_t)LINE_HEIGHT};
 
             xcb_poly_fill_rectangle(qwm->conn, l->win, l->sel_text_gc, 1, &r);
         }
 
         xcb_gcontext_t gc = (i == l->sel) ? l->text_gc : qwm->taskbar->gc;
 
-        xcb_image_text_8(qwm->conn, (uint8_t)strlen(name), l->win, gc,
-                         LAUNCHER_PADDING, (int16_t)y, name);
+        xcb_image_text_8(qwm->conn, (uint8_t)strlen(name), l->win, gc, PADDING,
+                         (int16_t)y, name);
     }
 
     xcb_flush(qwm->conn);
