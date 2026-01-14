@@ -20,7 +20,7 @@ client_t *client_init(struct qwm_t *wm, xcb_window_t win)
 
     xcb_change_window_attributes(wm->conn, win, XCB_CW_EVENT_MASK, values);
 
-    fprintf(stderr, "client added: 0x%x (ws %d)\n", win, c->workspace);
+    // fprintf(stderr, "client added: 0x%x (ws %d)\n", win, c->workspace);
     return c;
 }
 
@@ -28,9 +28,42 @@ void client_kill(struct qwm_t *wm, client_t *c)
 {
     (void)wm;
     if (!c) return;
-    fprintf(stderr, "client removed: 0x%x (ws %d)\n", c->win, c->workspace);
+    // fprintf(stderr, "client removed: 0x%x (ws %d)\n", c->win, c->workspace);
     free(c);
 }
+
+/*
+// NOTE: this for window decoration - but it seems unstable
+void client_add_overlay(struct qwm_t *wm, client_t *c)
+{
+    if (!c) return;
+
+    int titlebar_height = 20;
+
+    // Generate ID for overlay window
+    c->frame = xcb_generate_id(wm->conn);
+
+    uint32_t mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
+    uint32_t values[2] = {0x444444, XCB_EVENT_MASK_EXPOSURE |
+                                        XCB_EVENT_MASK_BUTTON_PRESS};
+
+    // Create overlay window above client
+    xcb_create_window(wm->conn,
+                      XCB_COPY_FROM_PARENT,  // depth
+                      c->frame,              // window id
+                      wm->root,              // parent (root)
+                      c->x, c->y,            // top-left position of client
+                      c->w, titlebar_height, // width = client, height = bar
+                      0,                     // border
+                      XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT,
+                      mask, values);
+
+    // Map overlay window
+    xcb_map_window(wm->conn, c->frame);
+
+    xcb_flush(wm->conn);
+}
+*/
 
 void client_configure(struct qwm_t *wm, client_t *c, uint32_t x, uint32_t y,
                       uint32_t w, uint32_t h)

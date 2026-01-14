@@ -7,6 +7,7 @@ struct qwm_t;
 
 typedef struct client_t {
     xcb_window_t win;
+    // xcb_window_t frame;
     uint32_t x, y, w, h;
     uint16_t workspace;
     struct client_t *next;
@@ -18,6 +19,8 @@ void client_kill(struct qwm_t *wm, client_t *c);
 
 void client_configure(struct qwm_t *wm, client_t *c, uint32_t x, uint32_t y,
                       uint32_t w, uint32_t h);
+
+// void client_add_overlay(struct qwm_t *wm, client_t *c);
 
 void client_set_focus(struct qwm_t *wm, client_t *c, int32_t focused);
 

@@ -1,5 +1,6 @@
 #include "qwm.h"
 #include "launcher.h"
+#include "keys.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -8,13 +9,6 @@
 #include <unistd.h>   // access, X_OK
 #include <dirent.h>   // DIR, dirent, opendir, closedir
 #include <sys/stat.h> // stat, S_ISREG
-
-#define KEY_ENTER 36
-#define KEY_BACKSPACE 22
-#define KEY_ESCAPE 9
-
-#define KEY_UP 111
-#define KEY_DOWN 116
 
 #define LAUNCHER_LINE_HEIGHT 16
 #define LAUNCHER_PADDING 4
@@ -153,8 +147,8 @@ static void scan_path(launcher_t *l)
         closedir(d);
         dir = strtok_r(NULL, ":", &saveptr);
     }
-out:
-    printf("scanned %u commands\n", l->cmd_count);
+out:;
+    // printf("scanned %u commands\n", l->cmd_count);
 }
 
 static int simple_match(const char *input, const char *cmd)
@@ -401,46 +395,46 @@ static char keycode_to_char(uint8_t code)
 {
     switch (code)
     {
-    case 38: return 'a';
-    case 56: return 'b';
-    case 54: return 'c';
-    case 40: return 'd';
-    case 26: return 'e';
-    case 41: return 'f';
-    case 42: return 'g';
-    case 43: return 'h';
-    case 31: return 'i';
-    case 44: return 'j';
-    case 45: return 'k';
-    case 46: return 'l';
-    case 58: return 'm';
-    case 57: return 'n';
-    case 32: return 'o';
-    case 33: return 'p';
-    case 24: return 'q';
-    case 27: return 'r';
-    case 39: return 's';
-    case 28: return 't';
-    case 30: return 'u';
-    case 55: return 'v';
-    case 25: return 'w';
-    case 53: return 'x';
-    case 29: return 'y';
-    case 52: return 'z';
+    case KEY_A: return 'a';
+    case KEY_B: return 'b';
+    case KEY_C: return 'c';
+    case KEY_D: return 'd';
+    case KEY_E: return 'e';
+    case KEY_F: return 'f';
+    case KEY_G: return 'g';
+    case KEY_H: return 'h';
+    case KEY_I: return 'i';
+    case KEY_J: return 'j';
+    case KEY_K: return 'k';
+    case KEY_L: return 'l';
+    case KEY_M: return 'm';
+    case KEY_N: return 'n';
+    case KEY_O: return 'o';
+    case KEY_P: return 'p';
+    case KEY_Q: return 'q';
+    case KEY_R: return 'r';
+    case KEY_S: return 's';
+    case KEY_T: return 't';
+    case KEY_U: return 'u';
+    case KEY_V: return 'v';
+    case KEY_W: return 'w';
+    case KEY_X: return 'x';
+    case KEY_Y: return 'y';
+    case KEY_Z: return 'z';
 
-    case 10: return '1';
-    case 11: return '2';
-    case 12: return '3';
-    case 13: return '4';
-    case 14: return '5';
-    case 15: return '6';
-    case 16: return '7';
-    case 17: return '8';
-    case 18: return '9';
-    case 19: return '0';
-    case 20: return '-';
+    case KEY_1: return '1';
+    case KEY_2: return '2';
+    case KEY_3: return '3';
+    case KEY_4: return '4';
+    case KEY_5: return '5';
+    case KEY_6: return '6';
+    case KEY_7: return '7';
+    case KEY_8: return '8';
+    case KEY_9: return '9';
+    case KEY_0: return '0';
+    case KEY_MINUS: return '-';
 
-    case 65: return ' ';
+    case KEY_SPACE: return ' ';
     default: return 0;
     }
 }

@@ -1,4 +1,5 @@
 #include "qwm.h"
+#include "keys.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -6,31 +7,6 @@
 #include <sys/wait.h> // waitpid, sigemptyset, sigaction, SA_RESTART, SA_NOCLDSTOP
 #include <unistd.h> // fork, setsid, execlp, _exit
 #include <poll.h>   // struct pollfd, POLL_IN
-
-// NOTE: for now use what xcb keycode provide
-#define KEY_Q 24
-#define KEY_W 25
-#define KEY_T 28
-#define KEY_O 32
-
-#define KEY_H 43
-#define KEY_J 44
-#define KEY_K 45
-#define KEY_L 46
-
-#define KEY_S 39
-
-#define KEY_V 55
-
-#define KEY_ENTER 36
-#define KEY_ESCAPE 9
-#define KEY_SPACE 65
-
-#define KEY_1 10
-#define KEY_2 11
-#define KEY_3 12
-#define KEY_4 13
-#define KEY_5 14
 
 static void handle_child_signal(int sig)
 {
@@ -90,6 +66,22 @@ static void spawn_vlc(qwm_t *qwm)
         execlp("vlc", "vlc", NULL);
         _exit(1);
     }
+}
+
+void spawn_app(const char *name)
+{
+    if (fork() == 0)
+    {
+        setsid();
+        execlp(name, name, NULL);
+        _exit(1);
+    }
+}
+
+static void spawn(qwm_t *qwm, const char *name)
+{
+    (void)qwm;
+    spawn_app(name);
 }
 
 static void spawn_launcher(qwm_t *qwm)
@@ -218,25 +210,25 @@ static void ws_5(qwm_t *qwm) { workspace_switch(qwm, 4); }
 
 // TODO: make this generic & configureable
 static const keybind_t std_keybinds[] = {
-    {XCB_MOD_MASK_1, KEY_Q, quit_wm},
-    {XCB_MOD_MASK_1, KEY_W, quit_client_focused},
+    {KEY_ALT, KEY_Q, quit_wm},
+    {KEY_ALT, KEY_W, quit_client_focused},
 
-    {XCB_MOD_MASK_1, KEY_T, spawn_kitty},
-    {XCB_MOD_MASK_1, KEY_ENTER, spawn_xfce_term},
-    {XCB_MOD_MASK_1, KEY_V, spawn_vlc},
+    {KEY_ALT, KEY_T, spawn_kitty},
+    {KEY_ALT, KEY_ENTER, spawn_xfce_term},
+    {KEY_ALT, KEY_V, spawn_vlc},
 
-    {XCB_MOD_MASK_1, KEY_O, toggle_layout},
-    {XCB_MOD_MASK_1, KEY_J, focus_next},
-    {XCB_MOD_MASK_1, KEY_K, focus_prev},
-    {XCB_MOD_MASK_1, KEY_S, swap_master},
+    {KEY_ALT, KEY_O, toggle_layout},
+    {KEY_ALT, KEY_J, focus_next},
+    {KEY_ALT, KEY_K, focus_prev},
+    {KEY_ALT, KEY_S, swap_master},
 
-    {XCB_MOD_MASK_1, KEY_1, ws_1},
-    {XCB_MOD_MASK_1, KEY_2, ws_2},
-    {XCB_MOD_MASK_1, KEY_3, ws_3},
-    {XCB_MOD_MASK_1, KEY_4, ws_4},
-    {XCB_MOD_MASK_1, KEY_5, ws_5},
+    {KEY_ALT, KEY_1, ws_1},
+    {KEY_ALT, KEY_2, ws_2},
+    {KEY_ALT, KEY_3, ws_3},
+    {KEY_ALT, KEY_4, ws_4},
+    {KEY_ALT, KEY_5, ws_5},
 
-    {XCB_MOD_MASK_1, KEY_SPACE, spawn_launcher},
+    {KEY_ALT, KEY_SPACE, spawn_launcher},
     // TODO: add another things
 };
 
@@ -252,6 +244,8 @@ static void handle_map_request(qwm_t *wm, xcb_map_request_event_t *ev)
     xcb_map_window(wm->conn, ev->window);
 
     layout_apply(wm, wm->current_ws);
+
+    // client_add_overlay(wm, c);
 
     xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, ev->window,
                         XCB_CURRENT_TIME);
