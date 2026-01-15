@@ -10,6 +10,8 @@ Minimal X11 window manager written in C using xcb. Built from a learning-based p
 
 If it runs X, it can run qwm.
 
+![qwm screenshot](./screenshots/qwm_tiled01.png)
+
 ### Important Notes
 
 - Uses raw XCB keycodes: assumes US QWERTY keyboard layout
