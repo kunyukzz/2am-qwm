@@ -1,60 +1,74 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include "config_api.h"
+#include "core/config_api.h"
 
 // Color configuration
 #define BORDER_WIDTH 2
-#define BORDER_FOCUS 0xFF0000   // RED
-#define BORDER_UNFOCUS 0x222222 // GRAY
+#define BORDER_FOCUS 0x6699CC
+#define BORDER_UNFOCUS 0x222222
 
-#define TASKBAR_COLOR 0x444444      // DARK GRAY
-#define TASKBAR_FONT_COLOR 0xFFFFFF // WHITE
+#define TASKBAR_COLOR 0x444444
+#define TASKBAR_FONT_COLOR 0xDDDDDD
 
-#define LAUNCHER_WIDTH 400
-#define LAUNCHER_POSITION_Y 100
+#define LAUNCHER_WIDTH 600
+#define LAUNCHER_POSITION_Y 200
 #define LAUNCHER_BG_COLOR 0x444444
-#define LAUNCHER_FG_COLOR 0x808080 // LIGHT GRAY
-#define LAUNCHER_FONT_COLOR 0xFF0000
+#define LAUNCHER_FG_COLOR 0x666666
+#define LAUNCHER_FONT_COLOR 0xDDDDDD
 
 // application spawning configuration
 static inline void spawn_terminal(struct qwm_t *qwm)
 {
     (void)qwm;
-    spawn("xfce4-terminal");
+    spawn("kitty", NULL);
 }
 
-static inline void spawn_mousepad(struct qwm_t *qwm)
+static inline void spawn_browser(struct qwm_t *qwm)
 {
     (void)qwm;
-    spawn("mousepad");
+    spawn("firefox", NULL);
+}
+
+static inline void spawn_screenshot(struct qwm_t *qwm)
+{
+    (void)qwm;
+    spawn("flameshot", "gui", NULL);
+}
+
+static inline void spawn_fm(struct qwm_t *qwm)
+{
+    (void)qwm;
+    spawn("thunar", NULL);
 }
 
 static const keybind_t my_keybinds[] = {
-    {KEY_ALT, KEY_Q, quit_wm},
-    {KEY_ALT, KEY_W, quit_application},
+    {KEY_ALT | KEY_SHIFT, KEY_Q, quit_wm},
+    {KEY_SUPER, KEY_Q, quit_application},
 
-    {KEY_ALT, KEY_1, workspace_1},
-    {KEY_ALT, KEY_2, workspace_2},
-    {KEY_ALT, KEY_3, workspace_3},
-    {KEY_ALT, KEY_4, workspace_4},
-    {KEY_ALT, KEY_5, workspace_5},
+    {KEY_SUPER, KEY_1, workspace_1},
+    {KEY_SUPER, KEY_2, workspace_2},
+    {KEY_SUPER, KEY_3, workspace_3},
+    {KEY_SUPER, KEY_4, workspace_4},
+    {KEY_SUPER, KEY_5, workspace_5},
 
-    {KEY_ALT | KEY_SHIFT, KEY_1, move_to_workspace_1},
-    {KEY_ALT | KEY_SHIFT, KEY_2, move_to_workspace_2},
-    {KEY_ALT | KEY_SHIFT, KEY_3, move_to_workspace_3},
-    {KEY_ALT | KEY_SHIFT, KEY_4, move_to_workspace_4},
-    {KEY_ALT | KEY_SHIFT, KEY_5, move_to_workspace_5},
+    {KEY_SUPER | KEY_SHIFT, KEY_1, move_to_workspace_1},
+    {KEY_SUPER | KEY_SHIFT, KEY_2, move_to_workspace_2},
+    {KEY_SUPER | KEY_SHIFT, KEY_3, move_to_workspace_3},
+    {KEY_SUPER | KEY_SHIFT, KEY_4, move_to_workspace_4},
+    {KEY_SUPER | KEY_SHIFT, KEY_5, move_to_workspace_5},
 
-    {KEY_ALT, KEY_L, toggle_layout},
-    {KEY_ALT, KEY_K, focus_next},
-    {KEY_ALT, KEY_J, focus_prev},
+    {KEY_SUPER, KEY_L, toggle_layout},
+    {KEY_SUPER, KEY_K, focus_next},
+    {KEY_SUPER, KEY_J, focus_prev},
+    {KEY_SUPER, KEY_S, swap_master},
 
-    {KEY_ALT, KEY_SPACE, spawn_launcher},
-
-    {KEY_ALT, KEY_ENTER, spawn_terminal},
-    {KEY_ALT, KEY_M, spawn_mousepad},
-
+    {KEY_SUPER, KEY_SPACE, spawn_launcher},
+    {KEY_SUPER, KEY_ENTER, spawn_terminal},
+    {KEY_SUPER, KEY_B, spawn_browser},
+    {KEY_SUPER, KEY_P, spawn_screenshot},
+    {KEY_SUPER, KEY_O, spawn_fm},
 };
 
 #endif // CONFIG_H
+

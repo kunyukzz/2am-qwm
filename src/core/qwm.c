@@ -1,6 +1,6 @@
 #include "qwm.h"
-#include "keys.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -16,42 +16,58 @@ static void handle_child_signal(int sig)
     while (waitpid(-1, NULL, WNOHANG) > 0);
 }
 
-void quit_wm(struct qwm_t *qwm)
+static void kill_client_window(struct qwm_t *wm, xcb_window_t win)
 {
-    qwm_kill(qwm);
-    exit(0);
-}
-
-void quit_application(struct qwm_t *wm)
-{
-    if (!wm) return;
-
-    workspace_t *ws = &wm->workspaces[wm->current_ws];
-    client_t *c = ws->focused;
-    if (!c) return;
-
-    xcb_void_cookie_t ck = xcb_kill_client_checked(wm->conn, c->win);
+    xcb_void_cookie_t ck = xcb_kill_client_checked(wm->conn, win);
     xcb_generic_error_t *err = xcb_request_check(wm->conn, ck);
     if (err) free(err);
-
-    xcb_kill_client(wm->conn, c->win);
 }
 
-void spawn_launcher(qwm_t *qwm)
+static void move_to_new_ws(qwm_t *wm, client_t *c, uint16_t dst)
 {
-    if (qwm->launcher.opened) return;
-    launcher_open(qwm, &qwm->launcher);
-    qwm->launcher.opened = 1;
-}
+    if (!wm || !c) return;
+    if (dst >= WORKSPACE_COUNT) return;
 
-void spawn(const char *name)
-{
-    if (fork() == 0)
+    uint16_t src = c->workspace;
+    if (src == dst) return;
+
+    workspace_t *ws_src = &wm->workspaces[src];
+    workspace_t *ws_dst = &wm->workspaces[dst];
+
+    client_t **pc = &ws_src->clients;
+    while (*pc)
     {
-        setsid();
-        execlp(name, name, NULL);
-        _exit(1);
+        if (*pc == c)
+        {
+            *pc = c->next;
+            break;
+        }
+        pc = &(*pc)->next;
     }
+
+    if (ws_src->focused == c) ws_src->focused = ws_src->clients;
+
+    // insert into destination list (head)
+    c->next = ws_dst->clients;
+    ws_dst->clients = c;
+    ws_dst->focused = c;
+
+    c->workspace = dst;
+
+    if (wm->current_ws != dst) xcb_unmap_window(wm->conn, c->win);
+
+    layout_apply(wm, src);
+    layout_apply(wm, dst);
+
+    xcb_flush(wm->conn);
+}
+
+static void move_focused_to_ws(qwm_t *wm, uint16_t ws)
+{
+    workspace_t *w = &wm->workspaces[wm->current_ws];
+    if (!w->focused) return;
+
+    move_to_new_ws(wm, w->focused, ws);
 }
 
 static void workspace_switch(qwm_t *wm, uint16_t new_ws)
@@ -78,6 +94,115 @@ static void workspace_switch(qwm_t *wm, uint16_t new_ws)
     {
         xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT,
                             cur->focused->win, XCB_CURRENT_TIME);
+    }
+}
+
+/*****************************
+ *****************************/
+
+void quit_wm(struct qwm_t *qwm)
+{
+    qwm_kill(qwm);
+    exit(0);
+}
+
+void quit_application(struct qwm_t *wm)
+{
+    if (!wm) return;
+
+    workspace_t *ws = &wm->workspaces[wm->current_ws];
+    client_t *c = ws->focused;
+    if (!c) return;
+
+    xcb_get_property_cookie_t cookie = xcb_get_property(
+        wm->conn, 0, c->win, wm->atom.wm_protocols, XCB_ATOM_ATOM, 0, 1024);
+
+    xcb_get_property_reply_t *reply =
+        xcb_get_property_reply(wm->conn, cookie, NULL);
+
+    if (reply && reply->format == 32 && reply->type == XCB_ATOM_ATOM)
+    {
+        xcb_atom_t *atoms = (xcb_atom_t *)xcb_get_property_value(reply);
+        uint64_t num_atoms = (uint64_t)xcb_get_property_value_length(reply) /
+                             sizeof(xcb_atom_t);
+
+        int32_t supports_delete = 0;
+        for (uint64_t i = 0; i < num_atoms; ++i)
+        {
+            if (atoms[i] == wm->atom.wm_delete_window)
+            {
+                supports_delete = 1;
+                break;
+            }
+        }
+
+        if (supports_delete)
+        {
+            xcb_client_message_event_t ev = {
+                .response_type = XCB_CLIENT_MESSAGE,
+                .format = 32,
+                .sequence = 0,
+                .window = c->win,
+                .type = wm->atom.wm_protocols,
+                .data.data32 = {wm->atom.wm_delete_window, XCB_CURRENT_TIME}};
+
+            xcb_void_cookie_t ev_cookie = xcb_send_event_checked(
+                wm->conn, 0, c->win, XCB_EVENT_MASK_NO_EVENT, (char *)&ev);
+
+            xcb_generic_error_t *err = xcb_request_check(wm->conn, ev_cookie);
+            if (err)
+            {
+                kill_client_window(wm, c->win);
+                free(err);
+            }
+
+            xcb_flush(wm->conn);
+            free(reply);
+            return;
+        }
+    }
+
+    if (reply) free(reply);
+    kill_client_window(wm, c->win);
+}
+
+void spawn_launcher(qwm_t *qwm)
+{
+    if (qwm->launcher.opened) return;
+    launcher_open(qwm, &qwm->launcher);
+    qwm->launcher.opened = 1;
+}
+
+void spawn(const char *program, ...)
+{
+    if (fork() == 0)
+    {
+        setsid();
+
+        va_list args_count;
+        va_start(args_count, program);
+        uint32_t argc = 1;
+        while (va_arg(args_count, char *) != NULL)
+        {
+            argc++;
+        }
+        va_end(args_count);
+
+        char *argv[argc + 1];
+        argv[0] = (char *)program;
+
+        va_list args;
+        va_start(args, program);
+        for (uint32_t i = 1; i < argc; ++i)
+        {
+            argv[i] = va_arg(args, char *);
+        }
+        va_end(args);
+
+        argv[argc] = NULL;
+
+        execvp(program, argv);
+        _exit(EXIT_FAILURE);
     }
 }
 
@@ -163,53 +288,6 @@ void swap_master(struct qwm_t *wm)
     w->clients = f;
 
     layout_apply(wm, wm->current_ws);
-}
-
-static void move_to_new_ws(qwm_t *wm, client_t *c, uint16_t dst)
-{
-    if (!wm || !c) return;
-    if (dst >= WORKSPACE_COUNT) return;
-
-    uint16_t src = c->workspace;
-    if (src == dst) return;
-
-    workspace_t *ws_src = &wm->workspaces[src];
-    workspace_t *ws_dst = &wm->workspaces[dst];
-
-    client_t **pc = &ws_src->clients;
-    while (*pc)
-    {
-        if (*pc == c)
-        {
-            *pc = c->next;
-            break;
-        }
-        pc = &(*pc)->next;
-    }
-
-    if (ws_src->focused == c) ws_src->focused = ws_src->clients;
-
-    // insert into destination list (head)
-    c->next = ws_dst->clients;
-    ws_dst->clients = c;
-    ws_dst->focused = c;
-
-    c->workspace = dst;
-
-    if (wm->current_ws != dst) xcb_unmap_window(wm->conn, c->win);
-
-    layout_apply(wm, src);
-    layout_apply(wm, dst);
-
-    xcb_flush(wm->conn);
-}
-
-static void move_focused_to_ws(qwm_t *wm, uint16_t ws)
-{
-    workspace_t *w = &wm->workspaces[wm->current_ws];
-    if (!w->focused) return;
-
-    move_to_new_ws(wm, w->focused, ws);
 }
 
 void workspace_1(struct qwm_t *qwm) { workspace_switch(qwm, 0); }

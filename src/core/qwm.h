@@ -5,7 +5,7 @@
 #    define _POSIX_C_SOURCE 200809L
 #endif
 
-#include "config.h" // IWYU pragma: keep
+#include "../config.h" // IWYU pragma: keep
 #include "taskbar.h"
 #include "client.h"
 #include "views.h"

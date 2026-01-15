@@ -17,7 +17,7 @@ typedef struct {
     void (*func)(struct qwm_t *);
 } keybind_t;
 
-extern void spawn(const char *name);
+extern void spawn(const char *program, ...);
 
 void quit_wm(struct qwm_t *qwm);
 void quit_application(struct qwm_t *qwm);
