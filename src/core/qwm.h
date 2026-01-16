@@ -34,7 +34,7 @@ struct qwm_t {
 
     atom_t atom;
 
-    taskbar_t *taskbar;
+    taskbar_t taskbar;
     tray_status_t tray;
     launcher_t launcher;
 

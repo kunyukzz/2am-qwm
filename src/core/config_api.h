@@ -34,6 +34,7 @@ void move_to_workspace_3(struct qwm_t *qwm);
 void move_to_workspace_4(struct qwm_t *qwm);
 void move_to_workspace_5(struct qwm_t *qwm);
 
+void toggle_tile_orient(struct qwm_t *qwm);
 void toggle_layout(struct qwm_t *qwm);
 void focus_next(struct qwm_t *qwm);
 void focus_prev(struct qwm_t *qwm);

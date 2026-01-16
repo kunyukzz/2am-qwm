@@ -358,6 +358,22 @@ static int32_t update_uptime(uptime_t *up)
     return 0;
 }
 
+int32_t update_workspace_clients(struct qwm_t *wm, views_t *view)
+{
+    workspace_t *w = &wm->workspaces[wm->current_ws];
+    uint16_t count = 0;
+
+    for (client_t *c = w->clients; c; c = c->next) count++;
+
+    if (view->client_count != count)
+    {
+        view->client_count = count;
+        return 1;
+    }
+
+    return 0;
+}
+
 void tray_init(tray_status_t *ts)
 {
     memset(ts, 0, sizeof(*ts));
@@ -369,29 +385,16 @@ int32_t tray_update(struct qwm_t *wm, tray_status_t *ts)
     int32_t dirty = 0;
 
     dirty |= update_workspace(wm, &ts->view);
+    dirty |= update_workspace_clients(wm, &ts->view);
 
-    // printf("  Calling update_clock...\n");
     dirty |= update_clock(&ts->time_date);
-
-    // printf("  Calling update_governor...\n");
     dirty |= update_governor(&ts->gov);
-
-    // printf("  Calling update_cpu_freq...\n");
     dirty |= update_cpu_freq(&ts->cpu);
-
-    // printf("  Calling update_memory...\n");
     dirty |= update_memory(&ts->mems);
-
-    // printf("  Calling update_battery_status...\n");
     dirty |= update_battery_status(&ts->bat);
-
-    // printf("  Calling update_uptime...\n");
     dirty |= update_uptime(&ts->up);
-
-    // printf("  Calling update_connection...\n");
     dirty |= update_connection(&ts->connection);
 
-    // printf("  Returning dirty=%d\n\n", dirty);
     return dirty;
 }
 

@@ -284,7 +284,7 @@ void launcher_draw(struct qwm_t *qwm, launcher_t *l)
     int y = PADDING + LINE_HEIGHT;
 
     xcb_image_text_8(qwm->conn, (uint8_t)strlen(l->input), l->win,
-                     qwm->taskbar->gc, 8, 16, l->input);
+                     qwm->taskbar.gc, 8, 16, l->input);
 
     // draw matches below
     uint32_t draw_count = l->match_count;
@@ -306,7 +306,7 @@ void launcher_draw(struct qwm_t *qwm, launcher_t *l)
             xcb_poly_fill_rectangle(qwm->conn, l->win, l->sel_text_gc, 1, &r);
         }
 
-        xcb_gcontext_t gc = (i == l->sel) ? l->text_gc : qwm->taskbar->gc;
+        xcb_gcontext_t gc = (i == l->sel) ? l->text_gc : qwm->taskbar.gc;
 
         xcb_image_text_8(qwm->conn, (uint8_t)strlen(name), l->win, gc, PADDING,
                          (int16_t)y, name);

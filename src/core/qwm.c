@@ -206,6 +206,17 @@ void spawn(const char *program, ...)
     }
 }
 
+void toggle_tile_orient(struct qwm_t *wm)
+{
+    workspace_t *w = &wm->workspaces[wm->current_ws];
+
+    if (w->type == LAYOUT_TILE)
+    {
+        w->vertical = !w->vertical;
+        layout_apply(wm, wm->current_ws);
+    }
+}
+
 void toggle_layout(struct qwm_t *wm)
 {
     workspace_t *w = &wm->workspaces[wm->current_ws];
@@ -229,9 +240,12 @@ void focus_next(struct qwm_t *wm)
     xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, next->win,
                         XCB_CURRENT_TIME);
 
-    uint32_t v[] = {XCB_STACK_MODE_ABOVE};
-    xcb_configure_window(wm->conn, ws->focused->win,
-                         XCB_CONFIG_WINDOW_STACK_MODE, v);
+    if (ws->type != LAYOUT_TILE)
+    {
+        uint32_t v[] = {XCB_STACK_MODE_ABOVE};
+        xcb_configure_window(wm->conn, ws->focused->win,
+                             XCB_CONFIG_WINDOW_STACK_MODE, v);
+    }
 }
 
 void focus_prev(struct qwm_t *wm)
@@ -262,9 +276,12 @@ void focus_prev(struct qwm_t *wm)
     xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, prev->win,
                         XCB_CURRENT_TIME);
 
-    uint32_t v[] = {XCB_STACK_MODE_ABOVE};
-    xcb_configure_window(wm->conn, ws->focused->win,
-                         XCB_CONFIG_WINDOW_STACK_MODE, v);
+    if (ws->type != LAYOUT_TILE)
+    {
+        uint32_t v[] = {XCB_STACK_MODE_ABOVE};
+        xcb_configure_window(wm->conn, ws->focused->win,
+                             XCB_CONFIG_WINDOW_STACK_MODE, v);
+    }
 }
 
 void swap_master(struct qwm_t *wm)
@@ -341,10 +358,41 @@ static void handle_enter_notify(qwm_t *wm, xcb_enter_notify_event_t *ev)
             xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, c->win,
                                 XCB_CURRENT_TIME);
 
-            // raise window
-            uint32_t v[] = {XCB_STACK_MODE_ABOVE};
-            xcb_configure_window(wm->conn, c->win,
-                                 XCB_CONFIG_WINDOW_STACK_MODE, v);
+            if (w->type != LAYOUT_TILE)
+            {
+                uint32_t v[] = {XCB_STACK_MODE_ABOVE};
+                xcb_configure_window(wm->conn, c->win,
+                                     XCB_CONFIG_WINDOW_STACK_MODE, v);
+            }
+
+            return;
+        }
+    }
+}
+
+static void handle_button_press(qwm_t *wm, xcb_button_press_event_t *ev)
+{
+    workspace_t *w = &wm->workspaces[wm->current_ws];
+
+    for (client_t *c = w->clients; c; c = c->next)
+    {
+        if (c->win == ev->event)
+        {
+            if (w->focused == c) return;
+            if (w->focused) client_set_focus(wm, w->focused, 0);
+
+            w->focused = c;
+            client_set_focus(wm, c, 1);
+
+            xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, c->win,
+                                XCB_CURRENT_TIME);
+
+            if (w->type != LAYOUT_TILE)
+            {
+                uint32_t v[] = {XCB_STACK_MODE_ABOVE};
+                xcb_configure_window(wm->conn, c->win,
+                                     XCB_CONFIG_WINDOW_STACK_MODE, v);
+            }
 
             return;
         }
@@ -406,7 +454,7 @@ static void handle_configure_request(qwm_t *wm,
                                      xcb_configure_request_event_t *ev)
 {
     if (ev->window == wm->root) return;
-    if (ev->window == wm->taskbar->win) return;
+    if (ev->window == wm->taskbar.win) return;
 
     if (!allow_configure(wm, ev->window)) return;
 
@@ -420,7 +468,7 @@ static void handle_configure_request(qwm_t *wm,
     int32_t h = ev->height;
 
     int32_t max_x = wm->w - w - 2 * BORDER_WIDTH;
-    int32_t max_y = wm->h - wm->taskbar->height - h - 2 * BORDER_WIDTH;
+    int32_t max_y = wm->h - wm->taskbar.height - h - 2 * BORDER_WIDTH;
 
     if (x < 0) x = 0;
     if (y < 0) y = 0;
@@ -475,7 +523,7 @@ static void handle_event(qwm_t *qwm, xcb_generic_event_t *event)
         if (qwm->launcher.opened)
             launcher_draw(qwm, &qwm->launcher);
         else
-            taskbar_handle_expose(qwm, qwm->taskbar,
+            taskbar_handle_expose(qwm, &qwm->taskbar,
                                   (xcb_expose_event_t *)event);
     }
     break;
@@ -503,6 +551,8 @@ static void handle_event(qwm_t *qwm, xcb_generic_event_t *event)
     case XCB_DESTROY_NOTIFY:
         handle_destroy_notify(qwm, (xcb_destroy_notify_event_t *)event);
         break;
+    case XCB_BUTTON_PRESS:
+        handle_button_press(qwm, (xcb_button_press_event_t *)event);
     case XCB_KEY_PRESS:
     {
         xcb_key_press_event_t *kev = (xcb_key_press_event_t *)event;
@@ -580,12 +630,17 @@ qwm_t *qwm_init(void)
         qwm->workspaces[i].clients = NULL;
         qwm->workspaces[i].focused = NULL;
         qwm->workspaces[i].type = LAYOUT_MONOCLE;
+        qwm->workspaces[i].vertical = 1;
     }
 
     // clang-format off
 	uint32_t qwm_mask = XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_KEY_PRESS |
 						XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE | XCB_EVENT_MASK_POINTER_MOTION |
 						XCB_EVENT_MASK_PROPERTY_CHANGE | XCB_EVENT_MASK_ENTER_WINDOW |XCB_EVENT_MASK_FOCUS_CHANGE;
+	/*
+	uint32_t qwm_mask = XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_KEY_PRESS |
+						XCB_EVENT_MASK_PROPERTY_CHANGE | XCB_EVENT_MASK_ENTER_WINDOW |XCB_EVENT_MASK_FOCUS_CHANGE;
+	*/
 
     xcb_void_cookie_t ck = xcb_change_window_attributes_checked( qwm->conn, qwm->root, XCB_CW_EVENT_MASK, &qwm_mask);
     xcb_generic_error_t *qwm_err = xcb_request_check(qwm->conn, ck);
@@ -632,17 +687,8 @@ qwm_t *qwm_init(void)
         }
     }
 
-    // setup taskbar
-    qwm->taskbar = taskbar_init(qwm);
-    if (!qwm->taskbar)
-    {
-        xcb_disconnect(qwm->conn);
-        free(qwm);
-        return NULL;
-    }
-
+    taskbar_init(qwm, &qwm->taskbar);
     tray_init(&qwm->tray);
-
     launcher_init(&qwm->launcher);
 
     xcb_flush(qwm->conn);
@@ -672,7 +718,7 @@ void qwm_run(qwm_t *qwm)
         dirty |= tray_update(qwm, &qwm->tray);
         if (dirty)
         {
-            taskbar_draw(qwm, qwm->taskbar, &qwm->tray);
+            taskbar_draw(qwm, &qwm->taskbar, &qwm->tray);
             dirty = 0;
         }
     }
@@ -685,8 +731,7 @@ void qwm_kill(qwm_t *qwm)
     if (!qwm) return;
 
     launcher_kill(&qwm->launcher);
-
-    if (qwm->taskbar) taskbar_kill(qwm, qwm->taskbar);
+    taskbar_kill(qwm, &qwm->taskbar);
 
     if (qwm->conn) xcb_disconnect(qwm->conn);
     free(qwm);

@@ -17,6 +17,7 @@ typedef struct {
     client_t *clients;
     client_t *focused;
     layout_type_t type;
+    uint8_t vertical;
 } workspace_t;
 
 void layout_apply(struct qwm_t *wm, uint16_t ws);

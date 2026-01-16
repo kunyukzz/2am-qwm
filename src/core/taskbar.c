@@ -14,6 +14,7 @@ static void taskbar_draw_text(struct qwm_t *qwm, taskbar_t *tb, uint16_t x,
                      (int16_t)x, 16, text);
 }
 
+/*
 static uint16_t text_px_width(xcb_connection_t *conn, xcb_font_t font,
                               const char *text)
 {
@@ -42,11 +43,13 @@ static uint16_t text_px_width(xcb_connection_t *conn, xcb_font_t font,
     free(rep);
     return width;
 }
+*/
 
 static void taskbar_draw_right_text(struct qwm_t *qwm, taskbar_t *tb,
                                     const char *text, uint16_t spacing)
 {
-    uint16_t text_width = text_px_width(qwm->conn, tb->font, text);
+    // uint16_t text_width = text_px_width(qwm->conn, tb->font, text);
+    uint16_t text_width = (uint16_t)strlen(text) * tb->char_width;
     tb->right_x -= text_width;
 
     taskbar_draw_text(qwm, tb, tb->right_x, text);
@@ -127,11 +130,8 @@ static const char *connection_state_str(connect_state_t state)
  * TASKBAR
  *****************************/
 
-taskbar_t *taskbar_init(struct qwm_t *qwm)
+void taskbar_init(struct qwm_t *qwm, taskbar_t *tb)
 {
-    taskbar_t *tb = calloc(1, sizeof(taskbar_t));
-    if (!tb) return NULL;
-
     tb->height = 24;
     tb->width = qwm->w;
     tb->y_pos = qwm->screen->height_in_pixels - tb->height;
@@ -174,9 +174,17 @@ taskbar_t *taskbar_init(struct qwm_t *qwm)
                   XCB_GC_FOREGROUND | XCB_GC_BACKGROUND | XCB_GC_FONT,
                   gc_values);
 
-    xcb_flush(qwm->conn);
+    // caching char pixel
+    xcb_char2b_t c = {0, 'A'};
+    xcb_query_text_extents_cookie_t ck =
+        xcb_query_text_extents(qwm->conn, tb->font, 1, &c);
+    xcb_query_text_extents_reply_t *rep =
+        xcb_query_text_extents_reply(qwm->conn, ck, NULL);
 
-    return tb;
+    tb->char_width = rep ? (uint16_t)rep->overall_width : 8;
+    free(rep);
+
+    xcb_flush(qwm->conn);
 }
 
 void taskbar_kill(struct qwm_t *qwm, taskbar_t *tb)
@@ -185,7 +193,6 @@ void taskbar_kill(struct qwm_t *qwm, taskbar_t *tb)
     if (tb->gc) xcb_free_gc(qwm->conn, tb->gc);
     if (tb->font) xcb_close_font(qwm->conn, tb->font);
     if (tb->win) xcb_destroy_window(qwm->conn, tb->win);
-    free(tb);
 }
 
 void taskbar_draw(struct qwm_t *qwm, taskbar_t *tb, tray_status_t *ts)
@@ -193,14 +200,15 @@ void taskbar_draw(struct qwm_t *qwm, taskbar_t *tb, tray_status_t *ts)
     xcb_clear_area(qwm->conn, 0, tb->win, 0, 0, tb->width, tb->height);
 
     // left side
-    taskbar_draw_text(qwm, tb, 8, "2am-qwm");
+    taskbar_draw_text(qwm, tb, 8, "qwm");
 
-    char ws[8];
-    snprintf(ws, sizeof(ws), "| WS: %d", qwm->current_ws + 1);
-    taskbar_draw_text(qwm, tb, 60, ws);
+    char ws[16];
+    snprintf(ws, sizeof(ws), "| WS%d (%d)", qwm->current_ws + 1,
+             ts->view.client_count);
+    taskbar_draw_text(qwm, tb, 32, ws);
 
     const char *layout = layout_name(qwm->workspaces[qwm->current_ws].type);
-    taskbar_draw_text(qwm, tb, 110, layout);
+    taskbar_draw_text(qwm, tb, 96, layout);
 
     // right side
     tb->right_x = tb->width - RIGHT_PAD;

@@ -2,6 +2,8 @@
 
 bin
 build
+bin-test
+build-test
 
 builds
 memcheck.txt

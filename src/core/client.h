@@ -7,7 +7,6 @@ struct qwm_t;
 
 typedef struct client_t {
     xcb_window_t win;
-    // xcb_window_t frame;
     uint32_t x, y, w, h;
     uint16_t workspace;
     struct client_t *next;

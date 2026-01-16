@@ -4,8 +4,9 @@
 #include "views.h"
 
 typedef struct {
-    uint16_t last_workspace;
     layout_type_t last_layout;
+    uint16_t last_workspace;
+    uint16_t client_count;
 } views_t;
 
 typedef struct {

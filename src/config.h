@@ -59,6 +59,7 @@ static const keybind_t my_keybinds[] = {
     {KEY_SUPER | KEY_SHIFT, KEY_5, move_to_workspace_5},
 
     {KEY_SUPER, KEY_L, toggle_layout},
+    {KEY_SUPER, KEY_T, toggle_tile_orient},
     {KEY_SUPER, KEY_K, focus_next},
     {KEY_SUPER, KEY_J, focus_prev},
     {KEY_SUPER, KEY_S, swap_master},
