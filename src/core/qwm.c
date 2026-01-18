@@ -240,12 +240,9 @@ void focus_next(struct qwm_t *wm)
     xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, next->win,
                         XCB_CURRENT_TIME);
 
-    if (ws->type != LAYOUT_TILE)
-    {
-        uint32_t v[] = {XCB_STACK_MODE_ABOVE};
-        xcb_configure_window(wm->conn, ws->focused->win,
-                             XCB_CONFIG_WINDOW_STACK_MODE, v);
-    }
+    uint32_t v[] = {XCB_STACK_MODE_ABOVE};
+    xcb_configure_window(wm->conn, ws->focused->win,
+                         XCB_CONFIG_WINDOW_STACK_MODE, v);
 }
 
 void focus_prev(struct qwm_t *wm)
@@ -276,12 +273,9 @@ void focus_prev(struct qwm_t *wm)
     xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, prev->win,
                         XCB_CURRENT_TIME);
 
-    if (ws->type != LAYOUT_TILE)
-    {
-        uint32_t v[] = {XCB_STACK_MODE_ABOVE};
-        xcb_configure_window(wm->conn, ws->focused->win,
-                             XCB_CONFIG_WINDOW_STACK_MODE, v);
-    }
+    uint32_t v[] = {XCB_STACK_MODE_ABOVE};
+    xcb_configure_window(wm->conn, ws->focused->win,
+                         XCB_CONFIG_WINDOW_STACK_MODE, v);
 }
 
 void swap_master(struct qwm_t *wm)
@@ -358,12 +352,9 @@ static void handle_enter_notify(qwm_t *wm, xcb_enter_notify_event_t *ev)
             xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, c->win,
                                 XCB_CURRENT_TIME);
 
-            if (w->type != LAYOUT_TILE)
-            {
-                uint32_t v[] = {XCB_STACK_MODE_ABOVE};
-                xcb_configure_window(wm->conn, c->win,
-                                     XCB_CONFIG_WINDOW_STACK_MODE, v);
-            }
+            uint32_t v[] = {XCB_STACK_MODE_ABOVE};
+            xcb_configure_window(wm->conn, c->win,
+                                 XCB_CONFIG_WINDOW_STACK_MODE, v);
 
             return;
         }
@@ -387,12 +378,9 @@ static void handle_button_press(qwm_t *wm, xcb_button_press_event_t *ev)
             xcb_set_input_focus(wm->conn, XCB_INPUT_FOCUS_POINTER_ROOT, c->win,
                                 XCB_CURRENT_TIME);
 
-            if (w->type != LAYOUT_TILE)
-            {
-                uint32_t v[] = {XCB_STACK_MODE_ABOVE};
-                xcb_configure_window(wm->conn, c->win,
-                                     XCB_CONFIG_WINDOW_STACK_MODE, v);
-            }
+            uint32_t v[] = {XCB_STACK_MODE_ABOVE};
+            xcb_configure_window(wm->conn, c->win,
+                                 XCB_CONFIG_WINDOW_STACK_MODE, v);
 
             return;
         }
