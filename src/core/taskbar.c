@@ -48,7 +48,6 @@ static uint16_t text_px_width(xcb_connection_t *conn, xcb_font_t font,
 static void taskbar_draw_right_text(struct qwm_t *qwm, taskbar_t *tb,
                                     const char *text, uint16_t spacing)
 {
-    // uint16_t text_width = text_px_width(qwm->conn, tb->font, text);
     uint16_t text_width = (uint16_t)strlen(text) * tb->char_width;
     tb->right_x -= text_width;
 

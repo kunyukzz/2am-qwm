@@ -14,10 +14,9 @@ client_t *client_init(struct qwm_t *wm, xcb_window_t win)
     c->next = wm->workspaces[c->workspace].clients;
     wm->workspaces[c->workspace].clients = c;
 
-    uint32_t values[] = {
-        XCB_EVENT_MASK_ENTER_WINDOW | XCB_EVENT_MASK_FOCUS_CHANGE |
-        XCB_EVENT_MASK_PROPERTY_CHANGE | XCB_EVENT_MASK_BUTTON_PRESS |
-        XCB_EVENT_MASK_BUTTON_RELEASE};
+    uint32_t values[] = {XCB_EVENT_MASK_ENTER_WINDOW |
+                         XCB_EVENT_MASK_FOCUS_CHANGE |
+                         XCB_EVENT_MASK_PROPERTY_CHANGE};
 
     xcb_change_window_attributes(wm->conn, win, XCB_CW_EVENT_MASK, values);
 
